@@ -17,11 +17,33 @@ _DEFAULT_PRETOKENIZATION_REGEX = (
 _SPLIT_SPECIAL_TOKEN = "<|endoftext|>"
 
 
+@dataclass(frozen=True)
+class BytesPair:
+    """A pair of bytes used in BPE merges.
+
+    This is mostly needed because the solution wants to break ties by taking the max of the bytes
+    pairs of the same count. `heapq` in Python is a min-heap, so we need to create a custom class
+    and override the less-than operator to achieve this.
+    """
+
+    first: bytes
+    second: bytes
+
+    def __lt__(self, other: "BytesPair") -> bool:
+        """Less-than operator for BytesPair.
+
+        We want to break ties by taking the max of the bytes pairs, so we invert the comparison.
+        """
+        if self.first != other.first:
+            return self.first > other.first
+        return self.second > other.second
+
+
 @dataclass
 class BytesPairListNode:
     """A node in the bytes pair linked list."""
 
-    bytes_pair: tuple[bytes, bytes]
+    bytes_pair: BytesPair
     prev: "BytesPairListNode | None" = None
     next: "BytesPairListNode | None" = None
 
@@ -67,7 +89,7 @@ class BpeTokenizer:
         }
         for i in range(256):
             self._vocab[i + len(self._special_tokens)] = bytes([i])
-        self._merges: list[tuple[bytes, bytes]] = []
+        self._merges: list[BytesPair] = []
 
     def train(
         self,
@@ -84,25 +106,20 @@ class BpeTokenizer:
             self._preprocess_pretoken_counts(pretoken_counts)
         )
         # Build the initial heap of byte pairs based on their counts.
-        heap: list[tuple[int, tuple[int, ...], tuple[bytes, bytes]]] = [
-            (-count, self._get_inverted_ints_from_bytes_pair(bytes_pair), bytes_pair)
-            for bytes_pair, count in bytes_pair_counts.items()
+        heap: list[tuple[int, BytesPair]] = [
+            (-count, bytes_pair) for bytes_pair, count in bytes_pair_counts.items()
         ]
         heapq.heapify(heap)
         # Perform BPE merges until reaching the desired vocab size.
         while len(self._vocab) < self._vocab_size and heap:
-            neg_count, bytes_pair_inverted_ints, most_frequent_pair = heapq.heappop(
-                heap
-            )
+            neg_count, most_frequent_pair = heapq.heappop(heap)
             current_count = bytes_pair_counts.get(most_frequent_pair, 0)
             # If the count has changed, reinsert with the updated count.
             if -neg_count != current_count:
-                heapq.heappush(
-                    heap, (-current_count, bytes_pair_inverted_ints, most_frequent_pair)
-                )
+                heapq.heappush(heap, (-current_count, most_frequent_pair))
                 continue
             # Perform the merge.
-            new_token = most_frequent_pair[0] + most_frequent_pair[1]
+            new_token = most_frequent_pair.first + most_frequent_pair.second
             self._vocab[len(self._vocab)] = new_token
             self._merges.append(most_frequent_pair)
 
@@ -114,7 +131,7 @@ class BpeTokenizer:
                 heap,
                 pretoken_info_list,
             )
-        return self._vocab, self._merges
+        return self._vocab, self.get_merge_as_list_of_tuples()
 
     def _pretokenize_one_chunk(
         self,
@@ -190,8 +207,8 @@ class BpeTokenizer:
         pretoken_counts: Counter[bytes],
     ) -> tuple[
         list[PretokenInfo],
-        dict[tuple[bytes, bytes], set[int]],
-        dict[tuple[bytes, bytes], int],
+        dict[BytesPair, set[int]],
+        dict[BytesPair, int],
     ]:
         """
         Preprocess the pretoken counts into a structure suitable for BPE training.
@@ -207,10 +224,8 @@ class BpeTokenizer:
             dict[tuple[bytes, bytes], int]: counts of each byte pair across all pretokens.
         """
         pretoken_info_list: list[PretokenInfo] = []
-        bytes_pair_to_pretoken_positions: dict[tuple[bytes, bytes], set[int]] = (
-            defaultdict(set)
-        )
-        bytes_pair_counts: dict[tuple[bytes, bytes], int] = defaultdict(int)
+        bytes_pair_to_pretoken_positions: dict[BytesPair, set[int]] = defaultdict(set)
+        bytes_pair_counts: dict[BytesPair, int] = defaultdict(int)
 
         for pretoken, count in pretoken_counts.items():
             # Build the linked list of byte pairs for this pretoken
@@ -218,7 +233,10 @@ class BpeTokenizer:
             prev_node: BytesPairListNode | None = None
             byte_sequence = list(pretoken)
             for i in range(len(byte_sequence) - 1):
-                bytes_pair = (bytes([byte_sequence[i]]), bytes([byte_sequence[i + 1]]))
+                bytes_pair = BytesPair(
+                    first=bytes([byte_sequence[i]]),
+                    second=bytes([byte_sequence[i + 1]]),
+                )
                 current_node = BytesPairListNode(bytes_pair=bytes_pair)
                 bytes_pair_counts[bytes_pair] += count
                 if first_node is None:
@@ -240,14 +258,14 @@ class BpeTokenizer:
 
     def _bpe_merge(
         self,
-        most_frequent_pair: tuple[bytes, bytes],
-        bytes_pair_to_pretoken_positions: dict[tuple[bytes, bytes], set[int]],
-        bytes_pair_counts: dict[tuple[bytes, bytes], int],
-        search_heap: list[tuple[int, tuple[int, ...], tuple[bytes, bytes]]],
+        most_frequent_pair: BytesPair,
+        bytes_pair_to_pretoken_positions: dict[BytesPair, set[int]],
+        bytes_pair_counts: dict[BytesPair, int],
+        search_heap: list[tuple[int, BytesPair]],
         pretoken_info_list: list[PretokenInfo],
     ) -> None:
-        new_token = most_frequent_pair[0] + most_frequent_pair[1]
-        newly_generated_pair_counts: dict[tuple[bytes, bytes], int] = defaultdict(int)
+        new_token = most_frequent_pair.first + most_frequent_pair.second
+        newly_generated_pair_counts: dict[BytesPair, int] = defaultdict(int)
         for pos in bytes_pair_to_pretoken_positions.get(most_frequent_pair, set()):
             pretoken_info = pretoken_info_list[pos]
             node = pretoken_info.first_node
@@ -260,7 +278,10 @@ class BpeTokenizer:
                     pretoken_info.first_node = node.next
                 else:
                     node.prev.next = node.next
-                    new_bytes_pair = (node.prev.bytes_pair[0], new_token)
+                    new_bytes_pair = BytesPair(
+                        first=node.prev.bytes_pair.first,
+                        second=new_token,
+                    )
                     old_bytes_pair = node.prev.bytes_pair
                     node.prev.bytes_pair = new_bytes_pair
                     bytes_pair_counts[old_bytes_pair] -= pretoken_info.count
@@ -269,7 +290,10 @@ class BpeTokenizer:
                 # Update the next node's previous pointer and bytes pair.
                 if node.next is not None:
                     node.next.prev = node.prev
-                    new_bytes_pair = (new_token, node.next.bytes_pair[1])
+                    new_bytes_pair = BytesPair(
+                        first=new_token,
+                        second=node.next.bytes_pair.second,
+                    )
                     old_bytes_pair = node.next.bytes_pair
                     node.next.bytes_pair = new_bytes_pair
                     bytes_pair_counts[old_bytes_pair] -= pretoken_info.count
@@ -285,7 +309,6 @@ class BpeTokenizer:
                     search_heap,
                     (
                         -count,
-                        self._get_inverted_ints_from_bytes_pair(bytes_pair),
                         bytes_pair,
                     ),
                 )
@@ -293,15 +316,6 @@ class BpeTokenizer:
         del bytes_pair_counts[most_frequent_pair]
         del bytes_pair_to_pretoken_positions[most_frequent_pair]
 
-    def _get_inverted_ints_from_bytes_pair(
-        self,
-        bytes_pair: tuple[bytes, bytes],
-    ) -> tuple[int, ...]:
-        """Gets the inverted integer representation of a bytes pair."""
-
-        def _bytes_to_inverted_int(b: bytes) -> tuple[int, ...]:
-            return tuple(255 - byte for byte in list(b))
-
-        return _bytes_to_inverted_int(bytes_pair[0]) + _bytes_to_inverted_int(
-            bytes_pair[1]
-        )
+    def get_merge_as_list_of_tuples(self) -> list[tuple[bytes, bytes]]:
+        """Get the list of merges as a list of tuples."""
+        return [(pair.first, pair.second) for pair in self._merges]
