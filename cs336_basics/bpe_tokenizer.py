@@ -1,5 +1,6 @@
 """Byte Pair Encoding (BPE) tokenizer implementation."""
 
+import pickle
 import heapq
 
 from collections import Counter, defaultdict
@@ -61,19 +62,34 @@ class BpeTokenizer:
 
     def __init__(
         self,
-        vocab_size: int,
+        *,
+        vocab_size: int | None = None,
         pretokenization_regex: str = _DEFAULT_PRETOKENIZATION_REGEX,
-        split_special_token: str = _SPLIT_SPECIAL_TOKEN,
+        split_special_token: str | None = _SPLIT_SPECIAL_TOKEN,
         special_tokens: list[str] | None = None,
         pretokenization_num_processes: int = 4,
+        vocab: dict[int, bytes] | None = None,
+        merges: list[tuple[bytes, bytes]] | None = None,
     ) -> None:
-        self._vocab_size = vocab_size
+        """Initialize the BPE tokenizer.
+        Args:
+            vocab_size (int): The desired vocabulary size.
+            pretokenization_regex (str): The regex pattern for pretokenization.
+            split_special_token (str | None): Special token used to split the input during
+                pretokenization.
+            special_tokens (list[str] | None): List of special tokens to include in the vocabulary.
+            pretokenization_num_processes (int): Number of processes to use for pretokenization.
+            vocab (dict[int, bytes] | None): Predefined vocabulary to use. If provided, training
+                related arguments will be ignored, such as vocab_size.
+            merges (list[tuple[bytes, bytes]] | None): Predefined merges to use. If provided,
+                training related arguments will be ignored, such as vocab_size.
+        """
         # Compile the pretokenization regex pattern.
         self._pretokenization_regex_pattern = re.compile(
             pretokenization_regex, re.UNICODE
         )
         # Handle special tokens.
-        self._split_special_token = split_special_token
+        self._split_special_token = split_special_token or _SPLIT_SPECIAL_TOKEN
         self._special_tokens = set(special_tokens or [])
         if self._split_special_token not in self._special_tokens:
             self._special_tokens.add(self._split_special_token)
@@ -83,13 +99,28 @@ class BpeTokenizer:
         # Number of processes to use for pretokenization.
         self._pretokenization_num_processes = pretokenization_num_processes
         # Trained vocab and merges will be stored here after training.
-        self._vocab: dict[int, bytes] = {
-            i: special_token.encode("utf-8")
-            for i, special_token in enumerate(sorted(self._special_tokens))
-        }
-        for i in range(256):
-            self._vocab[i + len(self._special_tokens)] = bytes([i])
-        self._merges: list[BytesPair] = []
+        if vocab is not None and merges is not None:
+            self._vocab = vocab
+            self._merges = [
+                BytesPair(first=merge[0], second=merge[1]) for merge in merges
+            ]
+            self._vocab_size = len(vocab)
+        elif vocab is None and merges is None and vocab_size is not None:
+            self._vocab: dict[int, bytes] = {
+                i: special_token.encode("utf-8")
+                for i, special_token in enumerate(sorted(self._special_tokens))
+            }
+            for i in range(256):
+                self._vocab[i + len(self._special_tokens)] = bytes([i])
+            self._merges: list[BytesPair] = []
+            self._vocab_size = vocab_size
+        else:
+            raise ValueError(
+                "Both vocab and merges must be provided together, or neither."
+            )
+        # Data structures needed for encoding.
+        self._merges_to_idx: dict[BytesPair, int] = {}
+        self._inverted_vocab: dict[bytes, int] = {}
 
     def train(
         self,
@@ -114,6 +145,8 @@ class BpeTokenizer:
         while len(self._vocab) < self._vocab_size and heap:
             neg_count, most_frequent_pair = heapq.heappop(heap)
             current_count = bytes_pair_counts.get(most_frequent_pair, 0)
+            if current_count == 0:
+                continue
             # If the count has changed, reinsert with the updated count.
             if -neg_count != current_count:
                 heapq.heappush(heap, (-current_count, most_frequent_pair))
@@ -264,6 +297,8 @@ class BpeTokenizer:
         search_heap: list[tuple[int, BytesPair]],
         pretoken_info_list: list[PretokenInfo],
     ) -> None:
+        # TODO(djwenren): this could be further optimized by recording the nodes in the linked
+        # list that contain the most frequent pair, so we don't have to traverse the entire list.
         new_token = most_frequent_pair.first + most_frequent_pair.second
         newly_generated_pair_counts: dict[BytesPair, int] = defaultdict(int)
         for pos in bytes_pair_to_pretoken_positions.get(most_frequent_pair, set()):
@@ -319,3 +354,182 @@ class BpeTokenizer:
     def get_merge_as_list_of_tuples(self) -> list[tuple[bytes, bytes]]:
         """Get the list of merges as a list of tuples."""
         return [(pair.first, pair.second) for pair in self._merges]
+
+    @classmethod
+    def from_files(
+        cls,
+        vocab_filepath: str,
+        merges_filepath: str,
+        spelcial_tokens: list[str] | None = None,
+    ) -> "BpeTokenizer":
+        """Load a BPE tokenizer from saved vocab and merges files.
+
+        Args:
+            vocab_path (str): Path to the pickled vocab file.
+            merges_path (str): Path to the pickled merges file.
+        Returns:
+            BpeTokenizer: The loaded BPE tokenizer.
+        """
+        with open(vocab_filepath, "rb") as vocab_file:
+            vocab = pickle.load(vocab_file)
+        with open(merges_filepath, "rb") as merges_file:
+            merges = pickle.load(merges_file)
+        return cls(vocab=vocab, merges=merges, special_tokens=spelcial_tokens)
+
+    def _init_for_encoding(self) -> None:
+        """Initialize any data structures needed for encoding."""
+        self._merges_to_idx = {merge: idx for idx, merge in enumerate(self._merges)}
+        self._inverted_vocab = {
+            token: token_id for token_id, token in self._vocab.items()
+        }
+
+    def encode(self, text: str) -> list[int]:
+        """Encode the input text into a list of token IDs.
+
+        Args:
+            text (str): The input text to encode.
+
+        Returns:
+            list[int]: List of token IDs representing the encoded text.
+        """
+        if (not self._merges_to_idx) or (not self._inverted_vocab):
+            self._init_for_encoding()
+        output = []
+        for split_part in re.split(self._special_tokens_split_regex, text):
+            if not split_part:
+                continue
+            for match in self._pretokenization_regex_pattern.finditer(split_part):
+                pretoken = match.group(0).encode("utf-8")
+                token_ids = self._encode_one_pretoken(pretoken)
+                output.extend(token_ids)
+        return output
+
+    def _encode_one_pretoken(self, pretoken: bytes) -> list[int]:
+        """Encode a single pretoken into a list of token IDs.
+
+        Args:
+            pretoken (bytes): The pretoken to encode.
+
+        Returns:
+            list[int]: List of token IDs representing the encoded pretoken.
+        """
+        head_byte_pair = None
+        min_merge_idx_heap: list[tuple[int, BytesPair]] = []
+        byte_pairs_to_nodes: dict[BytesPair, list[BytesPairListNode]] = defaultdict(
+            list
+        )
+        # Initialization.
+        # Head's bytes pair always has b"" as first byte, so the head's bytes pair will never be
+        # merged. This simplifies the logic when collecting final tokens.
+        (
+            head_byte_pair,
+            min_merge_idx_heap,
+            byte_pairs_to_nodes,
+        ) = self._init_pretoken_for_encoding(pretoken)
+        # BPE merging.
+        while min_merge_idx_heap:
+            _, bytes_pair_to_merge = heapq.heappop(min_merge_idx_heap)
+            if bytes_pair_to_merge not in byte_pairs_to_nodes:
+                continue
+            for node in byte_pairs_to_nodes[bytes_pair_to_merge]:
+                # Check if the node is still valid. If it has been merged, skip it.
+                # The bytes pair in the min heap could be stale because we don't remove
+                # entries from the heap when a bytes pair is merged.
+                if node.bytes_pair != bytes_pair_to_merge:
+                    continue
+                new_token = bytes_pair_to_merge.first + bytes_pair_to_merge.second
+                # Update the previous node's next pointer and bytes pair.
+                if node.prev is None:
+                    # This shouldn't happen since head's bytes pair always has b"" as first byte,
+                    # and will never be popped from the heap.
+                    head_byte_pair = node.next
+                else:
+                    node.prev.next = node.next
+                    new_bytes_pair = BytesPair(
+                        first=node.prev.bytes_pair.first,
+                        second=new_token,
+                    )
+                    old_bytes_pair = node.prev.bytes_pair
+                    node.prev.bytes_pair = new_bytes_pair
+                    # Update the byte_pairs_to_nodes mapping.
+                    byte_pairs_to_nodes[old_bytes_pair].remove(node.prev)
+                    if not byte_pairs_to_nodes[old_bytes_pair]:
+                        del byte_pairs_to_nodes[old_bytes_pair]
+                    byte_pairs_to_nodes[new_bytes_pair].append(node.prev)
+                    # If the new bytes pair is in merges, add it to the heap.
+                    if new_bytes_pair in self._merges_to_idx:
+                        merge_idx = self._merges_to_idx[new_bytes_pair]
+                        heapq.heappush(min_merge_idx_heap, (merge_idx, new_bytes_pair))
+                # Update the next node's previous pointer and bytes pair.
+                if node.next is not None:
+                    node.next.prev = node.prev
+                    new_bytes_pair = BytesPair(
+                        first=new_token,
+                        second=node.next.bytes_pair.second,
+                    )
+                    old_bytes_pair = node.next.bytes_pair
+                    node.next.bytes_pair = new_bytes_pair
+                    # Update the byte_pairs_to_nodes mapping.
+                    byte_pairs_to_nodes[old_bytes_pair].remove(node.next)
+                    if not byte_pairs_to_nodes[old_bytes_pair]:
+                        del byte_pairs_to_nodes[old_bytes_pair]
+                    byte_pairs_to_nodes[new_bytes_pair].append(node.next)
+                    # If the new bytes pair is in merges, add it to the heap.
+                    if new_bytes_pair in self._merges_to_idx:
+                        merge_idx = self._merges_to_idx[new_bytes_pair]
+                        heapq.heappush(min_merge_idx_heap, (merge_idx, new_bytes_pair))
+        # Collect the final tokens.
+        return self._bytes_pair_linked_list_to_token_ids(head_byte_pair)
+
+    def _init_pretoken_for_encoding(
+        self,
+        pretoken: bytes,
+    ) -> tuple[
+        BytesPairListNode | None,
+        list[tuple[int, BytesPair]],
+        dict[BytesPair, list[BytesPairListNode]],
+    ]:
+        """Initialize any data structures needed for encoding."""
+        head_byte_pair = None
+        min_merge_idx_heap: list[tuple[int, BytesPair]] = []
+        byte_pairs_to_nodes: dict[BytesPair, list[BytesPairListNode]] = defaultdict(
+            list
+        )
+        byte_sequence = list(pretoken)
+        prev_node: BytesPairListNode | None = None
+        for i, _ in enumerate(byte_sequence):
+            bytes_pair = BytesPair(
+                first=bytes([byte_sequence[i - 1]]) if i > 0 else b"",
+                second=bytes([byte_sequence[i]]),
+            )
+            if (
+                bytes_pair in self._merges_to_idx
+                and bytes_pair not in byte_pairs_to_nodes
+            ):
+                merge_idx = self._merges_to_idx[bytes_pair]
+                min_merge_idx_heap.append((merge_idx, bytes_pair))
+
+            current_node = BytesPairListNode(bytes_pair=bytes_pair)
+            byte_pairs_to_nodes[bytes_pair].append(current_node)
+            if head_byte_pair is None:
+                head_byte_pair = current_node
+            if prev_node is not None:
+                prev_node.next = current_node
+                current_node.prev = prev_node
+            prev_node = current_node
+        heapq.heapify(min_merge_idx_heap)
+        return head_byte_pair, min_merge_idx_heap, byte_pairs_to_nodes
+
+    def _bytes_pair_linked_list_to_token_ids(
+        self,
+        head_byte_pair: BytesPairListNode | None,
+    ) -> list[int]:
+        """Convert a linked list of byte pairs to a list of token ids."""
+        tokens: list[int] = []
+        # Traverse the linked list and collect tokens.
+        current_node = head_byte_pair
+        while current_node is not None:
+            # Head's bytes pair always has b"" as first byte, so we skip it.
+            tokens.append(self._inverted_vocab[current_node.bytes_pair.second])
+            current_node = current_node.next
+        return tokens

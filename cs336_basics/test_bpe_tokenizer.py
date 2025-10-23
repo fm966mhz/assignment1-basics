@@ -82,3 +82,65 @@ def test_tokenizer_train_single_process():
     assert len(vocab) == (2 + 256 + 6)  # special tokens + byte vocab + 6 merges
     assert all(token in vocab.values() for token in [b"<|endoftext|>", b"<|pad|>"])
     assert merges == expected_merges
+
+
+def test_encode_one_pretoken():
+    """Test encoding a single pretoken."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"<|endoftext|>",
+            1: b"<|pad|>",
+            2: b"t",
+            3: b"h",
+            4: b"e",
+            5: b"th",
+            6: b"he",
+            7: b"the",
+        },
+        merges=[(b"h", b"e"), (b"t", b"h"), (b"th", b"e"), (b"t", b"he")],
+    )
+
+    token_ids = tokenizer.encode("the")
+    expected_token_ids = [7]  # "the" is a single token in the vocab
+    assert token_ids == expected_token_ids
+
+
+def test_encode_one_pretoken_repeated_bytes():
+    """Test encoding a single pretoken."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"<|endoftext|>",
+            1: b"<|pad|>",
+            2: b"l",
+            3: b"ll",
+            4: b"lll",
+            5: b"llll",
+        },
+        merges=[(b"l", b"l"), (b"ll", b"l"), (b"lll", b"l"), (b"l", b"ll")],
+    )
+    assert tokenizer.encode("llll") == [3, 3]
+
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"<|endoftext|>",
+            1: b"<|pad|>",
+            2: b"l",
+            3: b"ll",
+            4: b"lll",
+            5: b"llll",
+        },
+        merges=[
+            (b"l", b"l"),
+            (b"ll", b"l"),
+            (b"lll", b"l"),
+            (b"l", b"ll"),
+            (b"ll", b"ll"),
+        ],
+    )
+    assert tokenizer.encode("llll") == [5]  # "llll" is a single token in the vocab
