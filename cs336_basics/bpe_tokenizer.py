@@ -6,6 +6,7 @@ import heapq
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from multiprocessing import Pool
+from typing import Iterable, Iterator
 
 import regex as re
 
@@ -121,6 +122,8 @@ class BpeTokenizer:
         # Data structures needed for encoding.
         self._merges_to_idx: dict[BytesPair, int] = {}
         self._inverted_vocab: dict[bytes, int] = {}
+        # Longest vocab token length in utf-8 characters. This is useful for encoding.
+        self._longest_vocab_length: int = 0
 
     def train(
         self,
@@ -382,6 +385,7 @@ class BpeTokenizer:
         self._inverted_vocab = {
             token: token_id for token_id, token in self._vocab.items()
         }
+        self._longest_vocab_length = max(len(token) for token in self._vocab.values())
 
     def encode(self, text: str) -> list[int]:
         """Encode the input text into a list of token IDs.
@@ -395,14 +399,89 @@ class BpeTokenizer:
         if (not self._merges_to_idx) or (not self._inverted_vocab):
             self._init_for_encoding()
         output = []
-        for split_part in re.split(self._special_tokens_split_regex, text):
+        # Split by special tokens wrapped in capturing groups to keep the delimiters.
+        for split_part in re.split("(" + self._special_tokens_split_regex + ")", text):
             if not split_part:
+                continue
+            if split_part in self._special_tokens:
+                token_id = self._inverted_vocab[split_part.encode("utf-8")]
+                output.append(token_id)
                 continue
             for match in self._pretokenization_regex_pattern.finditer(split_part):
                 pretoken = match.group(0).encode("utf-8")
                 token_ids = self._encode_one_pretoken(pretoken)
                 output.extend(token_ids)
         return output
+
+    def encode_iterable(
+        self, iterable: Iterable[str], chunk_size: int = 4096
+    ) -> Iterator[int]:
+        """Encode an iterable of texts into an iterator of token IDs."""
+        if chunk_size < self._longest_vocab_length:
+            raise ValueError(
+                f"chunk_size must be at least {self._longest_vocab_length}"
+            )
+        current_chunk, lookahead = "", ""
+        if (not self._merges_to_idx) or (not self._inverted_vocab):
+            self._init_for_encoding()
+        for text in iterable:
+            if len(current_chunk) < chunk_size:
+                current_chunk += text
+                continue
+            if len(lookahead) < self._longest_vocab_length:
+                lookahead += text
+                continue
+            tokens, num_chars_tokenized = self._encode_one_chunk(
+                current_chunk, lookahead
+            )
+            yield from tokens
+            current_chunk = (current_chunk + lookahead)[num_chars_tokenized:] + text
+            lookahead = ""
+        # Encode any remaining text.
+        if current_chunk or lookahead:
+            tokens = self.encode(current_chunk + lookahead)
+            yield from tokens
+
+    def _encode_one_chunk(
+        self,
+        chunk: str,
+        lookahead: str,
+    ) -> tuple[list[int], int]:
+        """Encode a single chunk of text into a list of token IDs.
+
+        Args:
+            chunk (str): The input text chunk to encode.
+            lookahead (str): Additional text to look ahead for tokenization. This is used to handle
+                cases where a token may span across chunk boundaries.
+
+        Returns:
+            list[int]: List of token IDs representing the encoded text chunk.
+            int: Number of characters from the chunk that were tokenized.
+        """
+        output = []
+        num_characters_tokenized = 0
+        main_chunk_size = len(chunk)
+        for split_part in re.split(
+            "(" + self._special_tokens_split_regex + ")", chunk + lookahead
+        ):
+            if not split_part:
+                continue
+            if split_part in self._special_tokens:
+                token_id = self._inverted_vocab[split_part.encode("utf-8")]
+                output.append(token_id)
+                num_characters_tokenized += len(split_part)
+                if num_characters_tokenized >= main_chunk_size:
+                    break
+                else:
+                    continue
+            for match in self._pretokenization_regex_pattern.finditer(split_part):
+                pretoken = match.group(0).encode("utf-8")
+                token_ids = self._encode_one_pretoken(pretoken)
+                output.extend(token_ids)
+                num_characters_tokenized += len(match.group(0))
+                if num_characters_tokenized >= main_chunk_size:
+                    break
+        return output, num_characters_tokenized
 
     def _encode_one_pretoken(self, pretoken: bytes) -> list[int]:
         """Encode a single pretoken into a list of token IDs.
@@ -533,3 +612,16 @@ class BpeTokenizer:
             tokens.append(self._inverted_vocab[current_node.bytes_pair.second])
             current_node = current_node.next
         return tokens
+
+    def decode(self, token_ids: list[int]) -> str:
+        """Decode a list of token IDs back into a string.
+
+        Args:
+            token_ids (list[int]): List of token IDs to decode.
+
+        Returns:
+            str: The decoded string.
+        """
+        byte_chunks = [self._vocab[token_id] for token_id in token_ids]
+        decoded_string = b"".join(byte_chunks).decode("utf-8", errors="replace")
+        return decoded_string

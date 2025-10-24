@@ -144,3 +144,91 @@ def test_encode_one_pretoken_repeated_bytes():
         ],
     )
     assert tokenizer.encode("llll") == [5]  # "llll" is a single token in the vocab
+
+
+def test_encode_with_special_tokens():
+    """Test encoding text with special tokens."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"<|endoftext|>",
+            1: b"<|pad|>",
+            2: b"h",
+            3: b"i",
+            4: b"hi",
+            5: b"!",
+        },
+        merges=[(b"h", b"i"), (b"i", b"!")],
+    )
+
+    text = "hi<|endoftext|>hi!<|pad|>hi!hi!"
+    token_ids = tokenizer.encode(text)
+    # "hi", "<|endoftext|>", "hi", "!", "<|pad|>", "hi", "!", "hi", "!"
+    expected_token_ids = [4, 0, 4, 5, 1, 4, 5, 4, 5]
+    assert token_ids == expected_token_ids
+
+
+def test_encode_iterable_without_special_tokens():
+    """Test encoding an iterable of texts with special tokens."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"h",
+            1: b"i",
+            2: b"hi",
+            3: b"!",
+        },
+        merges=[(b"h", b"i"), (b"i", b"!")],
+    )
+
+    texts = ["hihi", "hi!hi!"]
+    token_ids_list = list(tokenizer.encode_iterable(texts, chunk_size=2))
+    expected_token_ids_list = [2, 2, 2, 3, 2, 3]
+    assert token_ids_list == expected_token_ids_list
+
+
+def test_encode_iterable_with_special_tokens():
+    """Test encoding an iterable of texts with special tokens."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|abc|>", "<|def|>"],
+        split_special_token="<|abc|>",
+        vocab={
+            0: b"<|abc|>",
+            1: b"<|def|>",
+            2: b"h",
+            3: b"i",
+            4: b"hi",
+            5: b"!",
+        },
+        merges=[(b"h", b"i"), (b"i", b"!")],
+    )
+
+    texts = ["hi<|ab", "c|>hi", "!<|def|", ">hi", "!hi!"]
+    token_ids_list = list(tokenizer.encode_iterable(texts, chunk_size=7))
+    # "hi", "<|abc|>", "hi", "!", "<|def|>", "hi", "!", "hi", "!"
+    expected_token_ids_list = [4, 0, 4, 5, 1, 4, 5, 4, 5]
+    assert token_ids_list == expected_token_ids_list
+
+
+def test_roundtrip_empty():
+    """Test encoding and decoding an empty string."""
+    tokenizer = BpeTokenizer(
+        special_tokens=["<|endoftext|>", "<|pad|>"],
+        split_special_token="<|endoftext|>",
+        vocab={
+            0: b"<|endoftext|>",
+            1: b"<|pad|>",
+            2: b"h",
+            3: b"i",
+            4: b"hi",
+            5: b"!",
+        },
+        merges=[(b"h", b"i"), (b"i", b"!")],
+    )
+    test_string = ""
+    encoded_ids = tokenizer.encode(test_string)
+    print(encoded_ids)
+    decoded_string = tokenizer.decode(encoded_ids)
+    assert test_string == decoded_string
