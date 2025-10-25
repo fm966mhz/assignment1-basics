@@ -370,6 +370,7 @@ class BpeTokenizer:
         Args:
             vocab_path (str): Path to the pickled vocab file.
             merges_path (str): Path to the pickled merges file.
+            spelcial_tokens (list[str] | None): List of special tokens to include in the tokenizer.
         Returns:
             BpeTokenizer: The loaded BPE tokenizer.
         """
@@ -422,6 +423,7 @@ class BpeTokenizer:
                 f"chunk_size must be at least {self._longest_vocab_length}"
             )
         current_chunk, lookahead = "", ""
+        # i = 0
         if (not self._merges_to_idx) or (not self._inverted_vocab):
             self._init_for_encoding()
         for text in iterable:
@@ -461,6 +463,7 @@ class BpeTokenizer:
         output = []
         num_characters_tokenized = 0
         main_chunk_size = len(chunk)
+        # print(f"main_chunk_size: {main_chunk_size}, lookahead size: {len(lookahead)}")
         for split_part in re.split(
             "(" + self._special_tokens_split_regex + ")", chunk + lookahead
         ):
@@ -471,7 +474,7 @@ class BpeTokenizer:
                 output.append(token_id)
                 num_characters_tokenized += len(split_part)
                 if num_characters_tokenized >= main_chunk_size:
-                    break
+                    return output, num_characters_tokenized
                 else:
                     continue
             for match in self._pretokenization_regex_pattern.finditer(split_part):
@@ -480,7 +483,7 @@ class BpeTokenizer:
                 output.extend(token_ids)
                 num_characters_tokenized += len(match.group(0))
                 if num_characters_tokenized >= main_chunk_size:
-                    break
+                    return output, num_characters_tokenized
         return output, num_characters_tokenized
 
     def _encode_one_pretoken(self, pretoken: bytes) -> list[int]:
