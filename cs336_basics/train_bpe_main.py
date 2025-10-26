@@ -59,7 +59,7 @@ def main(argv):
         split_special_token=FLAGS.split_special_token,
         pretokenization_num_processes=FLAGS.pretokenization_num_processes,
     )
-    vocab, merges = tokenizer.train(FLAGS.input_path)
+    vocab, merges = tokenizer.train(FLAGS.input_path, show_progress=True)
 
     # Save the learned vocabulary
     with open(FLAGS.output_vocab_path, "wb") as vocab_file:
