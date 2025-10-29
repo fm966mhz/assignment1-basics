@@ -32,3 +32,30 @@ class Linear(nn.Module):
     ) -> Float[torch.Tensor, "... d_out"]:
         """Forward pass."""
         return einops.einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")
+
+
+class Embedding(nn.Module):
+    """Embedding module."""
+
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.weight = nn.Parameter(
+            nn.init.trunc_normal_(
+                torch.empty(num_embeddings, embedding_dim, dtype=dtype, device=device),
+                std=1,
+                a=-3,
+                b=3,
+            )
+        )
+
+    def forward(
+        self, token_ids: Float[torch.LongTensor, "batch_size sequence_length"]
+    ) -> Float[torch.Tensor, "batch_size sequence_length embedding_dim"]:
+        """Foward pass."""
+        return self.weight[token_ids]
