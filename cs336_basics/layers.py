@@ -55,7 +55,36 @@ class Embedding(nn.Module):
         )
 
     def forward(
-        self, token_ids: Float[torch.LongTensor, "batch_size sequence_length"]
-    ) -> Float[torch.Tensor, "batch_size sequence_length embedding_dim"]:
+        self, token_ids: Float[torch.LongTensor, "..."]
+    ) -> Float[torch.Tensor, "... embedding_dim"]:
         """Foward pass."""
         return self.weight[token_ids]
+
+
+class RMSNorm(nn.Module):
+    """RMSNorm module."""
+
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.gain = nn.Parameter(torch.ones((d_model), device=device, dtype=dtype))
+        self.eps = eps
+
+    def forward(self, x: Float[torch.Tensor, "... d_model"]):
+        """Forward pass."""
+        assert x.shape[-1] == self.gain.shape[0], (
+            f"Input shape {x.shape}'s last dimension is different from what this module is expected"
+            " {self.gain.shape}"
+        )
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+        rms = torch.sqrt(self.eps + einops.reduce(x**2, "... d_model -> ...", "mean"))
+        result = einops.einsum(
+            x, 1.0 / rms, self.gain, "... d_model, ..., d_model -> ... d_model"
+        )
+        return result.to(in_dtype)
