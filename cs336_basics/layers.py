@@ -1,9 +1,13 @@
+"""Layers."""
+
 import einops
 import numpy as np
 import torch
 
 from jaxtyping import Float
 from torch import nn
+
+from cs336_basics.functions import silu
 
 
 class Linear(nn.Module):
@@ -88,3 +92,35 @@ class RMSNorm(nn.Module):
             x, 1.0 / rms, self.gain, "... d_model, ..., d_model -> ... d_model"
         )
         return result.to(in_dtype)
+
+
+class SwiGLU(nn.Module):
+    """SwiGLU module."""
+
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.in_projection_layer_1 = Linear(
+            in_features=d_model, out_features=d_ff, device=device, dtype=dtype
+        )
+        self.in_projection_layer_3 = Linear(
+            in_features=d_model, out_features=d_ff, device=device, dtype=dtype
+        )
+        self.out_projection_layer_2 = Linear(
+            in_features=d_ff, out_features=d_model, device=device, dtype=dtype
+        )
+
+    def forward(
+        self, x: Float[torch.Tensor, "... d_model"]
+    ) -> Float[torch.Tensor, "... d_model"]:
+        """Forward."""
+        out_1 = self.in_projection_layer_1(x)
+        out_3 = self.in_projection_layer_3(x)
+        return self.out_projection_layer_2(silu(out_1) * out_3)
