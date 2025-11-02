@@ -153,8 +153,9 @@ class Rope(nn.Module):
             torch.tensor([[0, -1.0], [1.0, 0]], device=device),
             "seq_len half_d_k, r_out r_in -> seq_len half_d_k r_out r_in",
         )
-        self.register_buffer("cosine_matrix", cosine_matrix, persistent=False)
-        self.register_buffer("sine_matrix", sine_matrix, persistent=False)
+        self.register_buffer(
+            "rope_matrix", cosine_matrix + sine_matrix, persistent=False
+        )
 
     def forward(
         self,
@@ -162,26 +163,21 @@ class Rope(nn.Module):
         token_positions: Float[torch.Tensor, "... seq_len"],
     ) -> Float[torch.Tensor, "... seq_len d_k"]:
         """Forward pass."""
-        cosine_position_embeddings: Float[
-            torch.Tensor, "... seq_len half_d_k r_out r_in"
-        ] = self.cosine_matrix[token_positions]
-        sine_position_embeddings: Float[
-            torch.Tensor, "... seq_len half_d_k r_out r_in"
-        ] = self.sine_matrix[token_positions]
+        position_embeddings: Float[torch.Tensor, "... seq_len half_d_k r_out r_in"] = (
+            self.rope_matrix[token_positions]
+        )
         x_rearanged = einops.rearrange(
             x, "... seq_len (half_d_k r_in) -> ... seq_len half_d_k r_in", r_in=2
         )
-        cosine_output = einops.einsum(
+        output = einops.einsum(
             x_rearanged,
-            cosine_position_embeddings,
-            "... seq_len half_d_k r_in, ... seq_len half_d_k r_out r_in -> ... seq_len half_d_k r_out",
-        )
-        sine_output = einops.einsum(
-            x_rearanged,
-            sine_position_embeddings,
-            "... seq_len half_d_k r_in, ... seq_len half_d_k r_out r_in -> ... seq_len half_d_k r_out",
+            position_embeddings,
+            (
+                "... seq_len half_d_k r_in, ... seq_len half_d_k r_out r_in -> "
+                "... seq_len half_d_k r_out"
+            ),
         )
         return einops.rearrange(
-            cosine_output + sine_output,
+            output,
             "... seq_len half_d_out r_out -> ... seq_len (half_d_out r_out)",
         )
