@@ -124,3 +124,64 @@ class SwiGLU(nn.Module):
         out_1 = self.in_projection_layer_1(x)
         out_3 = self.in_projection_layer_3(x)
         return self.out_projection_layer_2(silu(out_1) * out_3)
+
+
+class Rope(nn.Module):
+    """RoPE module."""
+
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ):
+        super().__init__()
+        theta_tensor = einops.einsum(
+            # Positions are zero-indexed.
+            torch.arange(max_seq_len, device=device),
+            1.0 / theta ** (2 * torch.arange(d_k // 2, device=device) / d_k),
+            "seq_len, half_d_k -> seq_len half_d_k",
+        )
+        cosine_matrix = einops.einsum(
+            torch.cos(theta_tensor),
+            torch.tensor([[1.0, 0], [0, 1.0]], device=device),
+            "seq_len half_d_k, r_out r_in -> seq_len half_d_k r_out r_in",
+        )
+        sine_matrix = einops.einsum(
+            torch.sin(theta_tensor),
+            torch.tensor([[0, -1.0], [1.0, 0]], device=device),
+            "seq_len half_d_k, r_out r_in -> seq_len half_d_k r_out r_in",
+        )
+        self.register_buffer("cosine_matrix", cosine_matrix, persistent=False)
+        self.register_buffer("sine_matrix", sine_matrix, persistent=False)
+
+    def forward(
+        self,
+        x: Float[torch.Tensor, "... seq_len d_k"],
+        token_positions: Float[torch.Tensor, "... seq_len"],
+    ) -> Float[torch.Tensor, "... seq_len d_k"]:
+        """Forward pass."""
+        cosine_position_embeddings: Float[
+            torch.Tensor, "... seq_len half_d_k r_out r_in"
+        ] = self.cosine_matrix[token_positions]
+        sine_position_embeddings: Float[
+            torch.Tensor, "... seq_len half_d_k r_out r_in"
+        ] = self.sine_matrix[token_positions]
+        x_rearanged = einops.rearrange(
+            x, "... seq_len (half_d_k r_in) -> ... seq_len half_d_k r_in", r_in=2
+        )
+        cosine_output = einops.einsum(
+            x_rearanged,
+            cosine_position_embeddings,
+            "... seq_len half_d_k r_in, ... seq_len half_d_k r_out r_in -> ... seq_len half_d_k r_out",
+        )
+        sine_output = einops.einsum(
+            x_rearanged,
+            sine_position_embeddings,
+            "... seq_len half_d_k r_in, ... seq_len half_d_k r_out r_in -> ... seq_len half_d_k r_out",
+        )
+        return einops.rearrange(
+            cosine_output + sine_output,
+            "... seq_len half_d_out r_out -> ... seq_len (half_d_out r_out)",
+        )
