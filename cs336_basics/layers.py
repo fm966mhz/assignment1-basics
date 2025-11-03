@@ -4,9 +4,11 @@ import einops
 import numpy as np
 import torch
 
+from jaxtyping import Int
 from jaxtyping import Float
 from torch import nn
 
+from cs336_basics.functions import scaled_dot_product_attention
 from cs336_basics.functions import silu
 
 
@@ -160,7 +162,7 @@ class Rope(nn.Module):
     def forward(
         self,
         x: Float[torch.Tensor, "... seq_len d_k"],
-        token_positions: Float[torch.Tensor, "... seq_len"],
+        token_positions: Int[torch.Tensor, "... seq_len"],
     ) -> Float[torch.Tensor, "... seq_len d_k"]:
         """Forward pass."""
         position_embeddings: Float[torch.Tensor, "... seq_len half_d_k r_out r_in"] = (
@@ -180,4 +182,89 @@ class Rope(nn.Module):
         return einops.rearrange(
             output,
             "... seq_len half_d_out r_out -> ... seq_len (half_d_out r_out)",
+        )
+
+
+class MultiHeadSelfAttention(nn.Module):
+    """Multi-head self attention modeul."""
+
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        assert (
+            d_model % num_heads == 0
+        ), f"d_model {d_model} must be divisible by num_heads {num_heads}."
+        d_head = d_model // num_heads
+        self.num_heads = num_heads
+        self.d_head = d_head
+        self.rope = None
+        if theta:
+            assert max_seq_len is not None and max_seq_len > 0, (
+                f"When theta {theta} is not None, RoPE will be applied and a positive `max_seq_len`"
+                " param must be provided, but got {max_seq_len}."
+            )
+            self.rope = Rope(
+                theta=theta, d_k=d_head, max_seq_len=max_seq_len, device=device
+            )
+        self.combined_in_projection = Linear(
+            in_features=d_model, out_features=3 * d_model, device=device, dtype=dtype
+        )
+        self.out_projection = Linear(
+            in_features=d_model, out_features=d_model, device=device, dtype=dtype
+        )
+
+    def forward(
+        self,
+        in_features: Float[torch.Tensor, "... seq_len d_model"],
+        token_positions: Int[torch.Tensor, "... seq_len"] | None = None,
+    ) -> Float[torch.Tensor, "... seq_len d_model"]:
+        """Runs forward pass."""
+        qkv_combined = einops.rearrange(
+            self.combined_in_projection(in_features),
+            "... seq_len (num_vars d_model) -> ... seq_len num_vars d_model",
+            num_vars=3,
+        )
+        qkv_combined = einops.rearrange(
+            qkv_combined, " ... num_vars d_model -> ... d_model num_vars"
+        )
+        q, k, v = qkv_combined[..., 0], qkv_combined[..., 1], qkv_combined[..., 2]
+        q = einops.rearrange(
+            q,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+        )
+        k = einops.rearrange(
+            k,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+        )
+        v = einops.rearrange(
+            v,
+            "... seq_len (num_heads d_head) -> ... num_heads seq_len d_head",
+            num_heads=self.num_heads,
+        )
+        seq_len = q.shape[-2]
+        mask = torch.tril(torch.ones(seq_len, seq_len)).to(torch.bool)
+        if token_positions is not None:
+            assert self.rope is not None, (
+                "`token_positions provided but the MultiHeadSelfAttention module doesn't a have "
+                "RoPE config."
+            )
+            q = self.rope(q, token_positions)
+            k = self.rope(k, token_positions)
+        scaled_dot_product_result = scaled_dot_product_attention(
+            q=q, k=k, v=v, mask=mask
+        )
+        return self.out_projection(
+            einops.rearrange(
+                scaled_dot_product_result,
+                "... num_heads seq_len d_head -> ... seq_len (num_heads d_head)",
+            )
         )
