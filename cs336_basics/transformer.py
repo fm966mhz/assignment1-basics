@@ -10,7 +10,6 @@ from jaxtyping import Int
 from jaxtyping import Float
 from torch import nn
 
-from cs336_basics import functions as F
 from cs336_basics import layers as L
 
 

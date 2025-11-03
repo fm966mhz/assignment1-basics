@@ -6,6 +6,7 @@ import torch
 
 from jaxtyping import Bool
 from jaxtyping import Float
+from jaxtyping import Int
 
 
 def silu(x: Float[torch.Tensor, "..."]):
@@ -38,4 +39,17 @@ def scaled_dot_product_attention(
         softmax(scaled_dot_product, dim=-1),
         v,
         "... queries_len keys_len, ... keys_len d_v -> ... queries_len d_v",
+    )
+
+
+def cross_entropy(
+    logits: Float[torch.Tensor, "... vocab_size"], targets: Int[torch.Tensor, "..."]
+) -> Float[torch.Tensor, ""]:
+    """Computes the cross entropy."""
+    logits_diffed: Float[torch.Tensor, "... vocab_size"] = (
+        logits - logits.max(dim=-1, keepdim=True)[0]
+    )
+    return torch.mean(
+        -torch.gather(logits_diffed, dim=-1, index=targets.unsqueeze(dim=-1))
+        + torch.log(torch.sum(torch.exp(logits_diffed), dim=-1))
     )

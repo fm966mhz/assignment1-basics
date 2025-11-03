@@ -9,6 +9,7 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.bpe_tokenizer import BpeTokenizer
+from cs336_basics.functions import cross_entropy
 from cs336_basics.functions import scaled_dot_product_attention
 from cs336_basics.functions import silu
 from cs336_basics.functions import softmax
@@ -323,24 +324,6 @@ def run_transformer_block(
         theta=theta,
         max_seq_len=max_seq_len,
     )
-    # transformer_block.load_state_dict(
-    #     {
-    #         "rms_norm_pre_attn.weight": weights["ln1.weight"],
-    #         "attn.combined_in_projection.weight": torch.cat(
-    #             (
-    #                 weights["attn.q_proj.weight"],
-    #                 weights["attn.k_proj.weight"],
-    #                 weights["attn.v_proj.weight"],
-    #             ),
-    #             dim=0,
-    #         ),
-    #         "attn.out_projection.weight": weights["attn.output_proj.weight"],
-    #         "rms_norm_pre_ff.weight": weights["ln2.weight"],
-    #         "ffn.in_projection_layer_1.weight": weights["ffn.w1.weight"],
-    #         "ffn.in_projection_layer_3.weight": weights["ffn.w3.weight"],
-    #         "ffn.out_projection_layer_2.weight": weights["ffn.w2.weight"],
-    #     }
-    # )
     transformer_block.load_state_dict(
         correct_transformer_block_weights_dict(input_dict=weights, path_prefix="")
     )
@@ -609,7 +592,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(
