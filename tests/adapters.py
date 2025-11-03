@@ -19,6 +19,8 @@ from cs336_basics.layers import RMSNorm
 from cs336_basics.layers import Rope
 from cs336_basics.layers import SwiGLU
 from cs336_basics.layers import TransfomerBlock
+from cs336_basics.transformer import TransformerConfig
+from cs336_basics.transformer import TransformerLm
 
 
 def run_linear(
@@ -321,25 +323,28 @@ def run_transformer_block(
         theta=theta,
         max_seq_len=max_seq_len,
     )
+    # transformer_block.load_state_dict(
+    #     {
+    #         "rms_norm_pre_attn.weight": weights["ln1.weight"],
+    #         "attn.combined_in_projection.weight": torch.cat(
+    #             (
+    #                 weights["attn.q_proj.weight"],
+    #                 weights["attn.k_proj.weight"],
+    #                 weights["attn.v_proj.weight"],
+    #             ),
+    #             dim=0,
+    #         ),
+    #         "attn.out_projection.weight": weights["attn.output_proj.weight"],
+    #         "rms_norm_pre_ff.weight": weights["ln2.weight"],
+    #         "ffn.in_projection_layer_1.weight": weights["ffn.w1.weight"],
+    #         "ffn.in_projection_layer_3.weight": weights["ffn.w3.weight"],
+    #         "ffn.out_projection_layer_2.weight": weights["ffn.w2.weight"],
+    #     }
+    # )
     transformer_block.load_state_dict(
-        {
-            "rms_norm_pre_attn.gain": weights["ln1.weight"],
-            "attn.combined_in_projection.weight": torch.cat(
-                (
-                    weights["attn.q_proj.weight"],
-                    weights["attn.k_proj.weight"],
-                    weights["attn.v_proj.weight"],
-                ),
-                dim=0,
-            ),
-            "attn.out_projection.weight": weights["attn.output_proj.weight"],
-            "rms_norm_pre_ff.gain": weights["ln2.weight"],
-            "ffn.in_projection_layer_1.weight": weights["ffn.w1.weight"],
-            "ffn.in_projection_layer_3.weight": weights["ffn.w3.weight"],
-            "ffn.out_projection_layer_2.weight": weights["ffn.w2.weight"],
-        }
+        correct_transformer_block_weights_dict(input_dict=weights, path_prefix="")
     )
-    return transformer_block(in_features)
+    return transformer_block(in_features=in_features)
 
 
 def run_transformer_lm(
@@ -421,7 +426,94 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = TransformerLm(
+        config=TransformerConfig(
+            vocab_size=vocab_size,
+            context_length=context_length,
+            num_layers=num_layers,
+            num_heads=num_heads,
+            rope_theta=rope_theta,
+            d_model=d_model,
+            d_ff=d_ff,
+        )
+    )
+    correct_input_weights = {
+        "token_embeddings.weight": weights["token_embeddings.weight"],
+    }
+    for i in range(num_layers):
+        correct_input_weights |= correct_transformer_block_weights_dict(
+            input_dict=weights, path_prefix=f"layers.{i}."
+        )
+    correct_input_weights |= {
+        "ln_final.weight": weights["ln_final.weight"],
+        "lm_head.weight": weights["lm_head.weight"],
+    }
+
+    transformer_lm.load_state_dict(correct_input_weights)
+    output = transformer_lm(in_indices)
+    return output
+
+
+def _assert_path_exist(input_dict: dict[str, Tensor], path_prefix: str, suffix: str):
+    assert (
+        path_prefix + suffix in input_dict
+    ), f'"{path_prefix + suffix}" expected in the input dict of weights, but it is not.'
+
+
+def correct_multi_head_self_attention_module_weights_dict(
+    input_dict: dict[str, Tensor], path_prefix: str
+) -> dict[str, Tensor]:
+    _assert_path_exist(input_dict, path_prefix, "q_proj.weight")
+    _assert_path_exist(input_dict, path_prefix, "k_proj.weight")
+    _assert_path_exist(input_dict, path_prefix, "v_proj.weight")
+    _assert_path_exist(input_dict, path_prefix, "output_proj.weight")
+    return {
+        path_prefix
+        + "combined_in_projection.weight": torch.cat(
+            (
+                input_dict[path_prefix + "q_proj.weight"],
+                input_dict[path_prefix + "k_proj.weight"],
+                input_dict[path_prefix + "v_proj.weight"],
+            ),
+            dim=0,
+        ),
+        path_prefix
+        + "out_projection.weight": input_dict[path_prefix + "output_proj.weight"],
+    }
+
+
+def correct_swiglu_weights_dict(
+    input_dict: dict[str, Tensor], path_prefix: str
+) -> dict[str, Tensor]:
+    _assert_path_exist(input_dict, path_prefix, "w1.weight")
+    _assert_path_exist(input_dict, path_prefix, "w2.weight")
+    _assert_path_exist(input_dict, path_prefix, "w2.weight")
+    return {
+        path_prefix
+        + "in_projection_layer_1.weight": input_dict[path_prefix + "w1.weight"],
+        path_prefix
+        + "in_projection_layer_3.weight": input_dict[path_prefix + "w3.weight"],
+        path_prefix
+        + "out_projection_layer_2.weight": input_dict[path_prefix + "w2.weight"],
+    }
+
+
+def correct_transformer_block_weights_dict(
+    input_dict: dict[str, Tensor], path_prefix: str
+) -> dict[str, Tensor]:
+    output = {
+        path_prefix + "rms_norm_pre_attn.weight": input_dict[path_prefix + "ln1.weight"]
+    }
+    output |= correct_multi_head_self_attention_module_weights_dict(
+        input_dict=input_dict, path_prefix=path_prefix + "attn."
+    )
+    output |= {
+        path_prefix + "rms_norm_pre_ff.weight": input_dict[path_prefix + "ln2.weight"]
+    }
+    output |= correct_swiglu_weights_dict(
+        input_dict=input_dict, path_prefix=path_prefix + "ffn."
+    )
+    return output
 
 
 def run_rmsnorm(
@@ -445,7 +537,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rmsnorm_layer = RMSNorm(d_model=d_model, eps=eps)
-    rmsnorm_layer.load_state_dict({"gain": weights})
+    rmsnorm_layer.load_state_dict({"weight": weights})
     return rmsnorm_layer(in_features)
 
 

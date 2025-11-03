@@ -78,12 +78,12 @@ class RMSNorm(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
-        self.gain = nn.Parameter(torch.ones((d_model), device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones((d_model), device=device, dtype=dtype))
         self.eps = eps
 
     def forward(self, x: Float[torch.Tensor, "... d_model"]):
         """Forward pass."""
-        assert x.shape[-1] == self.gain.shape[0], (
+        assert x.shape[-1] == self.weight.shape[0], (
             f"Input shape {x.shape}'s last dimension is different from what this module is expected"
             " {self.gain.shape}"
         )
@@ -91,7 +91,7 @@ class RMSNorm(nn.Module):
         x = x.to(torch.float32)
         rms = torch.sqrt(self.eps + einops.reduce(x**2, "... d_model -> ...", "mean"))
         result = einops.einsum(
-            x, 1.0 / rms, self.gain, "... d_model, ..., d_model -> ... d_model"
+            x, 1.0 / rms, self.weight, "... d_model, ..., d_model -> ... d_model"
         )
         return result.to(in_dtype)
 
