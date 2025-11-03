@@ -268,3 +268,51 @@ class MultiHeadSelfAttention(nn.Module):
                 "... num_heads seq_len d_head -> ... seq_len (num_heads d_head)",
             )
         )
+
+
+class TransfomerBlock(nn.Module):
+    """The Transformer block."""
+
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        theta: float | None = None,
+        max_seq_len: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+        *,
+        eps: float = 1e-5,
+    ):
+        super().__init__()
+        self.rms_norm_pre_attn = RMSNorm(
+            d_model=d_model, eps=eps, device=device, dtype=dtype
+        )
+        self.attn = MultiHeadSelfAttention(
+            d_model=d_model,
+            num_heads=num_heads,
+            theta=theta,
+            max_seq_len=max_seq_len,
+            device=device,
+            dtype=dtype,
+        )
+        self.rms_norm_pre_ff = RMSNorm(
+            d_model=d_model, eps=eps, device=device, dtype=dtype
+        )
+        self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff, device=device, dtype=dtype)
+
+    def forward(
+        self, in_features: Float[torch.Tensor, "... seq_len d_model"]
+    ) -> Float[torch.Tensor, "... seq_len d_model"]:
+        """Runs the forward pass."""
+        assert (
+            in_features.dim() >= 2
+        ), f"`in_features` must have at least 2 dimensions, but got {in_features.dim()}"
+        token_positions = torch.arange(in_features.shape[-2])
+        activation = self.rms_norm_pre_attn(in_features)
+        activation = self.attn(in_features=activation, token_positions=token_positions)
+        post_attn_block_activation = in_features + activation
+        activation = self.rms_norm_pre_ff(post_attn_block_activation)
+        activation = self.ffn(activation)
+        return post_attn_block_activation + activation

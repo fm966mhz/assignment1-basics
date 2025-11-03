@@ -18,6 +18,7 @@ from cs336_basics.layers import MultiHeadSelfAttention
 from cs336_basics.layers import RMSNorm
 from cs336_basics.layers import Rope
 from cs336_basics.layers import SwiGLU
+from cs336_basics.layers import TransfomerBlock
 
 
 def run_linear(
@@ -313,7 +314,32 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    transformer_block = TransfomerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        theta=theta,
+        max_seq_len=max_seq_len,
+    )
+    transformer_block.load_state_dict(
+        {
+            "rms_norm_pre_attn.gain": weights["ln1.weight"],
+            "attn.combined_in_projection.weight": torch.cat(
+                (
+                    weights["attn.q_proj.weight"],
+                    weights["attn.k_proj.weight"],
+                    weights["attn.v_proj.weight"],
+                ),
+                dim=0,
+            ),
+            "attn.out_projection.weight": weights["attn.output_proj.weight"],
+            "rms_norm_pre_ff.gain": weights["ln2.weight"],
+            "ffn.in_projection_layer_1.weight": weights["ffn.w1.weight"],
+            "ffn.in_projection_layer_3.weight": weights["ffn.w3.weight"],
+            "ffn.out_projection_layer_2.weight": weights["ffn.w2.weight"],
+        }
+    )
+    return transformer_block(in_features)
 
 
 def run_transformer_lm(
