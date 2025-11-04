@@ -21,6 +21,7 @@ from cs336_basics.layers import Rope
 from cs336_basics.layers import SwiGLU
 from cs336_basics.layers import TransfomerBlock
 from cs336_basics.optimizers import AdamW
+from cs336_basics.optimizers import get_cosine_lr
 from cs336_basics.transformer import TransformerConfig
 from cs336_basics.transformer import TransformerLm
 
@@ -642,7 +643,13 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    return get_cosine_lr(
+        it=it,
+        max_learning_rate=max_learning_rate,
+        min_learning_rate=min_learning_rate,
+        warmup_iters=warmup_iters,
+        cosine_cycle_iters=cosine_cycle_iters,
+    )
 
 
 def run_save_checkpoint(
