@@ -21,6 +21,7 @@ from cs336_basics.layers import Rope
 from cs336_basics.layers import SwiGLU
 from cs336_basics.layers import TransfomerBlock
 from cs336_basics.optimizers import AdamW
+from cs336_basics.optimizers import clip_gradient
 from cs336_basics.optimizers import get_cosine_lr
 from cs336_basics.transformer import TransformerConfig
 from cs336_basics.transformer import TransformerLm
@@ -608,7 +609,7 @@ def run_gradient_clipping(
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    return clip_gradient(parameters=parameters, max_l2_norm=max_l2_norm)
 
 
 def get_adamw_cls() -> Any:

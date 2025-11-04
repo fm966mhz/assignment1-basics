@@ -141,3 +141,29 @@ def get_cosine_lr(
             + min_learning_rate
         )
     return min_learning_rate
+
+
+def clip_gradient(
+    parameters: Iterable[nn.Parameter], max_l2_norm: float, eps: float = 1e-6
+) -> None:
+    """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
+
+    Args:
+        parameters (Iterable[torch.nn.Parameter]): collection of trainable parameters.
+        max_l2_norm (float): a positive value containing the maximum l2-norm.
+
+    The gradients of the parameters (parameter.grad) are modified in-place.
+    """
+    l2_norm_squared = torch.zeros(())
+    for p in parameters:
+        if p.grad is None:
+            continue
+        l2_norm_squared += torch.sum(p.grad.data**2)
+    l2_norm = torch.sqrt(l2_norm_squared).cpu().item()
+    if l2_norm <= max_l2_norm:
+        return
+    scaling_factor = max_l2_norm / (l2_norm + eps)
+    for p in parameters:
+        if p.grad is None:
+            continue
+        p.grad.data *= scaling_factor
