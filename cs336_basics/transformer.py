@@ -45,6 +45,11 @@ class TransformerLm(nn.Module):
             device=device,
             dtype=dtype,
         )
+        self.rope = L.Rope(
+            theta=config.rope_theta,
+            d_k=config.d_model // config.num_heads,
+            max_seq_len=config.context_length,
+        )
         transfomer_blocks = []
         assert (
             config.num_layers > 0
@@ -59,8 +64,7 @@ class TransformerLm(nn.Module):
                         d_ff_to_d_model=config.d_ff_to_d_model,
                         d_ff=config.d_ff,
                     ),
-                    theta=config.rope_theta,
-                    max_seq_len=config.context_length,
+                    rope=self.rope,
                     device=device,
                     dtype=dtype,
                 )
@@ -76,8 +80,11 @@ class TransformerLm(nn.Module):
     ) -> Float[torch.Tensor, "... seq_len vocab_size"]:
         """Run the forward pass."""
         activation = self.token_embeddings(input_tokens)
+        token_positions = torch.arange(input_tokens.shape[-1])
         for transformer_block in self.layers:
-            activation = transformer_block(activation)
+            activation = transformer_block(
+                in_features=activation, token_positions=token_positions
+            )
         activation = self.ln_final(activation)
         return self.lm_head(activation)
 

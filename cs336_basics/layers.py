@@ -192,8 +192,7 @@ class MultiHeadSelfAttention(nn.Module):
         self,
         d_model: int,
         num_heads: int,
-        theta: float | None = None,
-        max_seq_len: int | None = None,
+        rope: Rope | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
@@ -204,15 +203,7 @@ class MultiHeadSelfAttention(nn.Module):
         d_head = d_model // num_heads
         self.num_heads = num_heads
         self.d_head = d_head
-        self.rope = None
-        if theta:
-            assert max_seq_len is not None and max_seq_len > 0, (
-                f"When theta {theta} is not None, RoPE will be applied and a positive `max_seq_len`"
-                " param must be provided, but got {max_seq_len}."
-            )
-            self.rope = Rope(
-                theta=theta, d_k=d_head, max_seq_len=max_seq_len, device=device
-            )
+        self.rope = rope
         self.combined_in_projection = Linear(
             in_features=d_model, out_features=3 * d_model, device=device, dtype=dtype
         )
@@ -278,8 +269,7 @@ class TransfomerBlock(nn.Module):
         d_model: int,
         num_heads: int,
         d_ff: int,
-        theta: float | None = None,
-        max_seq_len: int | None = None,
+        rope: Rope | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
         *,
@@ -292,8 +282,7 @@ class TransfomerBlock(nn.Module):
         self.attn = MultiHeadSelfAttention(
             d_model=d_model,
             num_heads=num_heads,
-            theta=theta,
-            max_seq_len=max_seq_len,
+            rope=rope,
             device=device,
             dtype=dtype,
         )
@@ -303,7 +292,9 @@ class TransfomerBlock(nn.Module):
         self.ffn = SwiGLU(d_model=d_model, d_ff=d_ff, device=device, dtype=dtype)
 
     def forward(
-        self, in_features: Float[torch.Tensor, "... seq_len d_model"]
+        self,
+        in_features: Float[torch.Tensor, "... seq_len d_model"],
+        token_positions: Int[torch.Tensor, "... seq_len"],
     ) -> Float[torch.Tensor, "... seq_len d_model"]:
         """Runs the forward pass."""
         assert (
