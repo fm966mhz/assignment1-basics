@@ -20,6 +20,7 @@ from cs336_basics.layers import RMSNorm
 from cs336_basics.layers import Rope
 from cs336_basics.layers import SwiGLU
 from cs336_basics.layers import TransfomerBlock
+from cs336_basics.optimizers import AdamW
 from cs336_basics.transformer import TransformerConfig
 from cs336_basics.transformer import TransformerLm
 
@@ -613,7 +614,7 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
