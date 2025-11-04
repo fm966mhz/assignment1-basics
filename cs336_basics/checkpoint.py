@@ -1,7 +1,11 @@
 """Checkpoint."""
 
 import os
+import pathlib
+import pickle
 import typing
+
+from dataclasses import dataclass
 
 import torch
 
@@ -62,3 +66,95 @@ def load_checkpoint(
     model.load_state_dict(checkpoint_data["model"])
     optimizer.load_state_dict(checkpoint_data["optimizer"])
     return checkpoint_data["iteration"]
+
+
+@dataclass
+class CheckpointMetadata:
+    """Metadata for the checkpoints in this directory."""
+
+    # Map from iteration to checkpoint (relative) filename.
+    iteration_to_filename: dict[int, str]
+    # The iteration of the latest checkpoint.
+    latest_checkpointed_iteration: int
+    # At most this many checkpoints should be kept.
+    max_num_checkpoints: int
+
+
+class CheckpointManager:
+    """Checkpoint manager."""
+
+    def __init__(self, checkpoint_dir: str, max_num_checkpoints: int):
+        self.checkpoint_dir = pathlib.Path(checkpoint_dir)
+        assert (
+            self.checkpoint_dir.is_dir()
+        ), f"The checkpoint dir {checkpoint_dir} is not a directory."
+        self.metadata_file = self.checkpoint_dir / "METADATA"
+        if self.metadata_file.exists():
+            with open(self.metadata_file, "rb") as f:
+                self.checkpoint_metadata: CheckpointMetadata = pickle.load(f)
+                self.checkpoint_metadata.max_num_checkpoints = max_num_checkpoints
+            self._trim_checkpoint_files()
+        else:
+            self.checkpoint_metadata = CheckpointMetadata(
+                iteration_to_filename={},
+                latest_checkpointed_iteration=0,
+                max_num_checkpoints=max_num_checkpoints,
+            )
+
+    def _trim_checkpoint_files(self) -> None:
+        sorted_iterations = sorted(
+            self.checkpoint_metadata.iteration_to_filename.keys()
+        )
+        i = 0
+        while (
+            len(self.checkpoint_metadata.iteration_to_filename)
+            > self.checkpoint_metadata.max_num_checkpoints
+        ):
+            iteration = sorted_iterations[i]
+            os.remove(
+                self.checkpoint_dir
+                / self.checkpoint_metadata.iteration_to_filename[iteration]
+            )
+            del self.checkpoint_metadata.iteration_to_filename[iteration]
+            i += 1
+        self._dump_metadata()
+
+    def _dump_metadata(self) -> None:
+        with open(self.metadata_file, "wb") as f:
+            pickle.dump(self.checkpoint_metadata, f)
+
+    def save_checkpoint(
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        iteration: int,
+    ) -> None:
+        """Saves a checkpoint."""
+        assert iteration > self.checkpoint_metadata.latest_checkpointed_iteration
+        output_filename = f"{iteration}.pt"
+        save_checkpoint(
+            model=model,
+            optimizer=optimizer,
+            iteration=iteration,
+            out=self.checkpoint_dir / output_filename,
+        )
+        self.checkpoint_metadata.iteration_to_filename[iteration] = output_filename
+        self.checkpoint_metadata.latest_checkpointed_iteration = iteration
+        self._trim_checkpoint_files()
+        with open(self.check)
+
+    def load_checkpoint(
+        self, model: nn.Module, optimizer: optim.Optimizer, iteration: int | None = None
+    ) -> int:
+        """Loads a checkpoint."""
+        if iteration is None:
+            iteration = self.checkpoint_metadata.latest_checkpointed_iteration
+        src_filename = self.checkpoint_metadata.iteration_to_filename[iteration]
+        iteration_from_ckpt = load_checkpoint(
+            src=self.checkpoint_dir / src_filename, model=model, optimizer=optimizer
+        )
+        assert iteration == iteration_from_ckpt, (
+            f"Checkpoint data corrupted. Expected iteration from metadata: {iteration}, but "
+            "checkpoint file indicates {iteration_from_ckpt}."
+        )
+        return iteration
