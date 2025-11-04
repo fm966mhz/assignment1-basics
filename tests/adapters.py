@@ -9,6 +9,8 @@ import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
 from cs336_basics.bpe_tokenizer import BpeTokenizer
+from cs336_basics.checkpoint import load_checkpoint
+from cs336_basics.checkpoint import save_checkpoint
 from cs336_basics.data_loader import get_batch
 from cs336_basics.functions import cross_entropy
 from cs336_basics.functions import scaled_dot_product_attention
@@ -670,7 +672,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    save_checkpoint(model=model, optimizer=optimizer, iteration=iteration, out=out)
 
 
 def run_load_checkpoint(
@@ -691,7 +693,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(src=src, model=model, optimizer=optimizer)
 
 
 def get_tokenizer(
