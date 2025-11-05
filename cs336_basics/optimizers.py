@@ -3,7 +3,7 @@
 import math
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, List
 from typing import Iterable
 from typing import Optional
 from typing import TypeAlias
@@ -56,10 +56,10 @@ class AdamW(optim.Optimizer):
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
     ):
-        assert lr > 0, f"Invalid learning rate: {lr}."
-        assert weight_decay > 0, f"Invalid weight decay: {weight_decay}"
+        assert lr >= 0, f"Invalid learning rate: {lr}."
+        assert weight_decay >= 0, f"Invalid weight decay: {weight_decay}"
         assert eps > 0, f"Invalid eps: {eps}"
-        assert betas[0] > 0 and betas[1] > 0, f"Invalid betas: {betas}"
+        assert 1 >= betas[0] > 0 and 1 >= betas[1] > 0, f"Invalid betas: {betas}"
         super().__init__(
             params=params,
             defaults={
@@ -141,6 +141,37 @@ def get_cosine_lr(
             + min_learning_rate
         )
     return min_learning_rate
+
+
+class CosineLrScheduler(optim.lr_scheduler.LRScheduler):
+    """The cosine LR scheduler."""
+
+    def __init__(
+        self,
+        optimizer: optim.Optimizer,
+        max_learning_rate: float,
+        min_learning_rate: float,
+        warmup_iters: int,
+        cosine_cycle_iters: int,
+        last_epoch: int = -1,
+    ):
+        self.max_learning_rate = max_learning_rate
+        self.min_learning_rate = min_learning_rate
+        self.warmup_iters = warmup_iters
+        self.cosine_cycle_iters = cosine_cycle_iters
+        super().__init__(optimizer=optimizer, last_epoch=last_epoch)
+
+    def get_lr(self) -> List[float]:
+        return [
+            get_cosine_lr(
+                it=self.last_epoch,
+                max_learning_rate=self.max_learning_rate,
+                min_learning_rate=self.min_learning_rate,
+                warmup_iters=self.warmup_iters,
+                cosine_cycle_iters=self.cosine_cycle_iters,
+            )
+            for _ in self.optimizer.param_groups
+        ]
 
 
 def clip_gradient(

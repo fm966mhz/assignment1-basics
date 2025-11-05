@@ -300,7 +300,6 @@ class TransfomerBlock(nn.Module):
         assert (
             in_features.dim() >= 2
         ), f"`in_features` must have at least 2 dimensions, but got {in_features.dim()}"
-        token_positions = torch.arange(in_features.shape[-2])
         activation = self.rms_norm_pre_attn(in_features)
         activation = self.attn(in_features=activation, token_positions=token_positions)
         post_attn_block_activation = in_features + activation
