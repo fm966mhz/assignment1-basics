@@ -50,6 +50,6 @@ def cross_entropy(
         logits - logits.max(dim=-1, keepdim=True)[0]
     )
     return torch.mean(
-        -torch.gather(logits_diffed, dim=-1, index=targets.unsqueeze(dim=-1))
+        -torch.gather(logits_diffed, dim=-1, index=targets.unsqueeze(dim=-1)).squeeze()
         + torch.log(torch.sum(torch.exp(logits_diffed), dim=-1))
     )

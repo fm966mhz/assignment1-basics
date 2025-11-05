@@ -433,9 +433,6 @@ class BpeTokenizer:
         # Split by special tokens wrapped in capturing groups to keep the delimiters.
         split_regex = b"(" + self._special_tokens_split_regex + b")"
         all_split_parts = re.split(split_regex, text.encode("utf-8"))
-        print(
-            f"All split parts: {all_split_parts}, based on split regex: [{split_regex}]"
-        )
         if show_progress:
             all_split_parts = tqdm(all_split_parts)
         for split_part in all_split_parts:

@@ -59,7 +59,6 @@ def load_checkpoint(
         int: the previously-serialized number of iterations.
     """
     checkpoint_data = torch.load(src)
-    print(f"Loaded checkpoint data: {checkpoint_data}")
     assert "iteration" in checkpoint_data, "`iteration` not found in checkpoint data."
     assert "model" in checkpoint_data, "`model` not found in checkpoint data."
     assert "optimizer" in checkpoint_data, "`optimizer` not found in checkpoint data."
@@ -117,9 +116,6 @@ class CheckpointManager:
             )
             del self.checkpoint_metadata.iteration_to_filename[iteration]
             i += 1
-        self._dump_metadata()
-
-    def _dump_metadata(self) -> None:
         with open(self.metadata_file, "wb") as f:
             pickle.dump(self.checkpoint_metadata, f)
 
@@ -141,7 +137,6 @@ class CheckpointManager:
         self.checkpoint_metadata.iteration_to_filename[iteration] = output_filename
         self.checkpoint_metadata.latest_checkpointed_iteration = iteration
         self._trim_checkpoint_files()
-        with open(self.check)
 
     def load_checkpoint(
         self, model: nn.Module, optimizer: optim.Optimizer, iteration: int | None = None
@@ -149,6 +144,8 @@ class CheckpointManager:
         """Loads a checkpoint."""
         if iteration is None:
             iteration = self.checkpoint_metadata.latest_checkpointed_iteration
+        if iteration == 0:
+            return 0
         src_filename = self.checkpoint_metadata.iteration_to_filename[iteration]
         iteration_from_ckpt = load_checkpoint(
             src=self.checkpoint_dir / src_filename, model=model, optimizer=optimizer

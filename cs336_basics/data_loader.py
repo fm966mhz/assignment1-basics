@@ -11,7 +11,7 @@ def get_batch(
     dataset: Int[npt.NDArray, "dataset_size"],
     batch_size: int,
     context_length: int,
-    device: str,
+    device: str | torch.device | None,
 ) -> tuple[
     Int[torch.LongTensor, "batch_size context_length"],
     Int[torch.LongTensor, "batch_size context_length"],
