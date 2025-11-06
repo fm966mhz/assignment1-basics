@@ -29,14 +29,16 @@ def decode(
         input_tokens = input_tokens.to(device)
     for _ in range(max_output_length):
         logits: Float[torch.Tensor, "vocab_size"] = model(
-            torch.cat((input_tokens, torch.tensor(output, device=device)))
+            torch.cat(
+                (input_tokens, torch.tensor(output, dtype=torch.int64, device=device))
+            )
         )[-1]
         probs = F.softmax(x=logits / (temperature + eps), dim=-1)
         new_token_idx = nucleus_sample(probs, top_p).cpu().item()
         output.append(new_token_idx)
         if new_token_idx == stop_token:
             break
-    return torch.tensor(output, device=device)
+    return torch.tensor(output, dtype=torch.int64, device=device)
 
 
 def nucleus_sample(

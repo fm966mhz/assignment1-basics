@@ -4,14 +4,14 @@ set -euo pipefail
 
 # Note: BASE_DIR is the script path; change to dirname if you want the script directory.
 BASE_DIR="$1"
-EXP_NAME="init_test_2_on_mps"
+EXP_NAME="default_tiny_stories_on_mps"
 
 # Input data.
-TRAINING_DATASET_PATH="${BASE_DIR}/data/mini_tiny_stories_valid_tokens.npy"
-VALIDATION_DATASET_PATH="${BASE_DIR}/data/mini_tiny_stories_valid_tokens.npy"
+TRAINING_DATASET_PATH="${BASE_DIR}/data/tiny_stories_train_tokens.npy"
+VALIDATION_DATASET_PATH="${BASE_DIR}/data/tiny_stories_valid_tokens.npy"
 
 # Output paths.
-METRIC_HISTORY_DUMP_PATH="${BASE_DIR}/data/metric_history.pkl"
+METRIC_HISTORY_DUMP_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/metric_history.pkl"
 
 # Configs of the transformer (placeholders - edit as needed).
 VOCAB_SIZE=10000
@@ -30,13 +30,13 @@ ADAMW_BETA_2=0.999
 ADAMW_EPS=1e-8
 MAX_LEARNING_RATE=0.002
 MIN_LEARNING_RATE=0.0001
-LR_WARMUP_ITERS=20
-LR_COSINE_CYCLE_ITERS=100
+LR_WARMUP_ITERS=100
+LR_COSINE_CYCLE_ITERS=4900
 
 # Checkpointing (placeholders).
 CHECKPOINT_DIR_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/checkpoint"
 MAX_NUM_CHECKPOINTS=5
-CHECKPOINT_FREQ=10
+CHECKPOINT_FREQ=40
 
 # WANDB (placeholders)
 WANDB_ENTITY="fm966hz"
@@ -44,14 +44,17 @@ WANDB_PROJECT="cs336-assignment-1"
 WANDB_RUN_NAME="${EXP_NAME}"
 
 # Training config placeholders
-NUM_STEPS=120
-BATCH_SIZE=8
-VALIDATION_BATCH_SIZE=16
-VALIDATION_FREQ=10
-DEVICE="mps"
+NUM_STEPS=5000
+BATCH_SIZE=32
+VALIDATION_BATCH_SIZE=32
+VALIDATION_FREQ=50
+DEVICE="mps:0"
 
 # Gradient clipping
-# MAX_TOTAL_GRADIENT_L2_NORM=None
+MAX_TOTAL_GRADIENT_L2_NORM=4.0
+
+# Misc
+LOG_METRICS_TO_CONSOLE=false
 
 TRAIN_CMD="uv run cs336_basics/train_transformer_lm_main.py"
 
@@ -85,6 +88,7 @@ $TRAIN_CMD  \
 	--batch_size=${BATCH_SIZE} \
 	--validation_batch_size=${VALIDATION_BATCH_SIZE} \
 	--validation_freq=${VALIDATION_FREQ} \
-	--device="${DEVICE}"
-	# --max_total_gradient_l2_norm=${MAX_TOTAL_GRADIENT_L2_NORM}
+	--device="${DEVICE}" \
+	--log_metrics_to_console=${LOG_METRICS_TO_CONSOLE} \
+	--max_total_gradient_l2_norm=${MAX_TOTAL_GRADIENT_L2_NORM}
 

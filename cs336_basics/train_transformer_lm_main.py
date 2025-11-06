@@ -2,8 +2,11 @@
 
 import pickle
 
+from typing import Any
+
 import numpy as np
 import numpy.typing as npt
+import torch
 import wandb
 
 from absl import app
@@ -67,6 +70,8 @@ flags.DEFINE_integer("validation_freq", None, "Validation frequency.")
 flags.DEFINE_string("device", "cpu", "Device of the training.")
 # Gradient clipping
 flags.DEFINE_float("max_total_gradient_l2_norm", None, "Max total gradient L2 norm.")
+# Misc
+flags.DEFINE_bool("log_metrics_to_console", False, "Log metrics to the console.")
 
 
 def _get_train_and_validaton_datasets() -> tuple[npt.NDArray, npt.NDArray]:
@@ -81,6 +86,28 @@ def _load_or_create_checkpoint_manager() -> checkpoint.CheckpointManager:
         checkpoint_dir=FLAGS.checkpoint_dir_path,
         max_num_checkpoints=FLAGS.max_num_checkpoints,
     )
+
+
+def _get_wandb_config() -> dict[str, Any]:
+    return {
+        "vocab_size": FLAGS.vocab_size,
+        "max_content_length": FLAGS.max_context_length,
+        "num_layers": FLAGS.num_layers,
+        "num_heads": FLAGS.num_heads,
+        "rope_theta": FLAGS.rope_theta,
+        "d_model": FLAGS.d_model,
+        "d_ff": FLAGS.d_ff,
+        "d_ff_to_d_model": FLAGS.d_ff_to_d_model,
+        "weight_decay": FLAGS.weight_decay,
+        "adamw_beta_1": FLAGS.adamw_beta_1,
+        "adamw_beta_2": FLAGS.adamw_beta_2,
+        "max_learning_rate": FLAGS.max_learning_rate,
+        "min_learning_rate": FLAGS.min_learning_rate,
+        "lr_warmup_iters": FLAGS.lr_warmup_iters,
+        "lr_cosine_cycle_iters": FLAGS.lr_cosine_cycle_iters,
+        "num_steps": FLAGS.num_steps,
+        "batch_size": FLAGS.batch_size,
+    }
 
 
 def _load_or_init_state(
@@ -109,7 +136,10 @@ def _load_or_init_state(
     latest_checkpointed_iteration = checkpoint_manager.load_checkpoint(
         model=model, optimizer=optimizer, device=FLAGS.device
     )
-    # model.to(FLAGS.device)
+    if FLAGS.device.startswith("mps"):
+        model = torch.compile(model, backend="aot_eager")
+    else:
+        model = torch.compile(model)
     return (model, optimizer, latest_checkpointed_iteration)
 
 
@@ -154,7 +184,7 @@ def main(argv):
         entity=FLAGS.wandb_entity,
         project=FLAGS.wandb_project,
         name=FLAGS.wandb_run_name,
-        config={"dataset": "TinyStories", "min_learning_rate": FLAGS.min_learning_rate},
+        config=_get_wandb_config(),
     )
     logging.info("wandb run created.")
 
@@ -177,7 +207,7 @@ def main(argv):
         ),
         checkpoint_manager=checkpoint_manager,
         wandb_run=wandb_run,
-        log_to_console=True,
+        log_metrics_to_console=FLAGS.log_metrics_to_console,
     )
     logging.info("Main training loop completed.")
     with open(FLAGS.metric_history_dump_path, "wb") as f:

@@ -46,7 +46,7 @@ def train_loop(
     config: TrainingConfig,
     checkpoint_manager: CheckpointManager,
     wandb_run: wandb.Run,
-    log_to_console: bool = True,
+    log_metrics_to_console: bool = False,
 ) -> dict[str, list[float]]:
     """The main training loop."""
     metric_history = {
@@ -88,7 +88,7 @@ def train_loop(
                         model.parameters(), device=config.device
                     ),
                 },
-                step=t,
+                step=t + 1,
             )
 
         if config.max_total_gradient_l2_norm:
@@ -106,11 +106,11 @@ def train_loop(
                 validation_dataset=validation_dataset,
                 config=config,
                 wandb_run=wandb_run,
-                step=t,
+                step=t + 1,
             )
             metric_history["validation_loss"].append(validation_loss)
             metric_history["validation_perplexity"].append(validation_perplexity)
-            if log_to_console:
+            if log_metrics_to_console:
                 logging.info(
                     f"Iteration {t+1}. Training loss: {loss_val}. Validation loss: "
                     f"{validation_loss}. Validation perplexity: {validation_perplexity}."
