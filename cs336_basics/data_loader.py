@@ -13,8 +13,8 @@ def get_batch(
     context_length: int,
     device: str | torch.device | None,
 ) -> tuple[
-    Int[torch.LongTensor, "batch_size context_length"],
-    Int[torch.LongTensor, "batch_size context_length"],
+    Int[torch.Tensor, "batch_size context_length"],
+    Int[torch.Tensor, "batch_size context_length"],
 ]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
@@ -44,6 +44,8 @@ def get_batch(
     for i in range(0, context_length):
         selected_ranges.append(selected_start_ids + i)
     selected_ranges = np.stack(selected_ranges, axis=-1)
-    inputs = torch.LongTensor(dataset[selected_ranges], device=device)
-    labels = torch.LongTensor(dataset[selected_ranges + 1], device=device)
+    inputs = torch.tensor(dataset[selected_ranges], device=device, dtype=torch.int64)
+    labels = torch.tensor(
+        dataset[selected_ranges + 1], device=device, dtype=torch.int64
+    )
     return inputs, labels

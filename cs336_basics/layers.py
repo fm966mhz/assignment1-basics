@@ -61,7 +61,7 @@ class Embedding(nn.Module):
         )
 
     def forward(
-        self, token_ids: Float[torch.LongTensor, "..."]
+        self, token_ids: Int[torch.LongTensor, "..."]
     ) -> Float[torch.Tensor, "... embedding_dim"]:
         """Foward pass."""
         return self.weight[token_ids]
@@ -210,6 +210,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.out_projection = Linear(
             in_features=d_model, out_features=d_model, device=device, dtype=dtype
         )
+        self.device = device
 
     def forward(
         self,
@@ -242,7 +243,9 @@ class MultiHeadSelfAttention(nn.Module):
             num_heads=self.num_heads,
         )
         seq_len = q.shape[-2]
-        mask = torch.tril(torch.ones(seq_len, seq_len)).to(torch.bool)
+        mask = torch.tril(torch.ones(seq_len, seq_len, device=self.device)).to(
+            torch.bool
+        )
         if token_positions is not None:
             assert self.rope is not None, (
                 "`token_positions provided but the MultiHeadSelfAttention module doesn't a have "

@@ -15,10 +15,10 @@ def test_cosine_lr_scheduler():
     cosine_cycle_iters = 21
 
     expected_lrs = [
-        # There is no value `0` here because in the initializer of the scheduler, it already called
-        # `_update_lr` once
-        # https://github.com/pytorch/pytorch/blob/0fabc3ba44823f257e70ce397d989c8de5e362c1/torch/optim/lr_scheduler.py#L205,
+        # Despite `last_epoch` is init to -1, the scheduler initializer already called `step()` once
+        # https://github.com/pytorch/pytorch/blob/0fabc3ba44823f257e70ce397d989c8de5e362c1/torch/optim/lr_scheduler.py#L147,
         # which incremented `last_epoch` by 1.
+        0,
         0.14285714285714285,
         0.2857142857142857,
         0.42857142857142855,
@@ -43,7 +43,6 @@ def test_cosine_lr_scheduler():
         0.1,
         0.1,
         0.1,
-        0.1,
     ]
 
     test_model = nn.Linear(in_features=10, out_features=20)
@@ -59,9 +58,9 @@ def test_cosine_lr_scheduler():
 
     actual_lrs = []
     for _ in range(25):
+        actual_lrs.append(test_optimizer.param_groups[0]["lr"])
         test_optimizer.step()
         test_lr_schuduler.step()
-        actual_lrs.append(test_optimizer.param_groups[0]["lr"])
 
     np.testing.assert_allclose(
         actual=actual_lrs,

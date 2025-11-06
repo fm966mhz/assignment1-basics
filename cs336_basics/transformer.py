@@ -49,6 +49,7 @@ class TransformerLm(nn.Module):
             theta=config.rope_theta,
             d_k=config.d_model // config.num_heads,
             max_seq_len=config.context_length,
+            device=device,
         )
         transfomer_blocks = []
         assert (
@@ -72,7 +73,10 @@ class TransformerLm(nn.Module):
         self.layers = nn.ModuleList(transfomer_blocks)
         self.ln_final = L.RMSNorm(d_model=config.d_model, device=device, dtype=dtype)
         self.lm_head = L.Linear(
-            in_features=config.d_model, out_features=config.vocab_size
+            in_features=config.d_model,
+            out_features=config.vocab_size,
+            device=device,
+            dtype=dtype,
         )
 
     def forward(

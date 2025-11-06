@@ -16,6 +16,8 @@ from tqdm import tqdm
 from cs336_basics.checkpoint import CheckpointManager
 from cs336_basics.data_loader import get_batch
 from cs336_basics.functions import cross_entropy
+from cs336_basics.optimizers import clip_gradient
+from cs336_basics.optimizers import get_total_gradient_l2_norm
 
 
 @dataclass(frozen=True)
@@ -30,12 +32,15 @@ class TrainingConfig:
     validation_batch_size: int
     validation_freq: int
 
+    max_total_gradient_l2_norm: float | None = None
+
     device: torch.device | None = None
 
 
 def train_loop(
     model: nn.Module,
     optimizer: optim.Optimizer,
+    lr_scheduler: optim.lr_scheduler.LRScheduler,
     training_dataset: npt.NDArray,
     validation_dataset: npt.NDArray,
     config: TrainingConfig,
@@ -66,15 +71,34 @@ def train_loop(
             context_length=config.context_length,
             device=config.device,
         )
+        # Forward pass.
         logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(input_seq)
         loss = cross_entropy(logits=logits, targets=label_seq)
         loss_val = loss.detach().cpu().item()
         metric_history["training_loss"].append(loss_val)
-        if wandb_run is not None:
-            wandb_run.log({"training_loss": loss_val})
 
+        # Backward pass.
         loss.backward()
+        if wandb_run is not None:
+            wandb_run.log(
+                {
+                    "training_loss": loss_val,
+                    "lr": optimizer.param_groups[0]["lr"],
+                    "total_gradient_l2_norm": get_total_gradient_l2_norm(
+                        model.parameters(), device=config.device
+                    ),
+                },
+                step=t,
+            )
+
+        if config.max_total_gradient_l2_norm:
+            clip_gradient(
+                model.parameters(),
+                max_l2_norm=config.max_total_gradient_l2_norm,
+                device=config.device,
+            )
         optimizer.step()
+        lr_scheduler.step()
 
         if (t + 1 - latest_checkpointed_iteration) % config.validation_freq == 0:
             validation_loss, validation_perplexity = run_validation(
@@ -82,8 +106,9 @@ def train_loop(
                 validation_dataset=validation_dataset,
                 config=config,
                 wandb_run=wandb_run,
+                step=t,
             )
-            metric_history["validation_los"].append(validation_loss)
+            metric_history["validation_loss"].append(validation_loss)
             metric_history["validation_perplexity"].append(validation_perplexity)
             if log_to_console:
                 logging.info(
@@ -103,6 +128,7 @@ def run_validation(
     validation_dataset: npt.NDArray,
     config: TrainingConfig,
     wandb_run: wandb.Run,
+    step: int,
 ) -> tuple[float, float]:
     """Runs valiation.
 
@@ -124,6 +150,7 @@ def run_validation(
             {
                 "validation_loss": loss,
                 "validation_perplexity": perplexity,
-            }
+            },
+            step=step,
         )
     return loss, perplexity

@@ -35,12 +35,22 @@ flags.DEFINE_integer("num_heads", None, "Number of heads.")
 flags.DEFINE_float("rope_theta", None, "RoPE theta.")
 flags.DEFINE_integer("d_model", None, "d_model.")
 flags.DEFINE_float("d_ff_to_d_model", 8.0 / 3.0, "d_ff_to_d_model.")
-# Configs of the AdamD optimizer.
-flags.DEFINE_float("lr", 1e-3, "The learning rate.")
-flags.DEFINE_float("weight_decay", 0.01, "Weight decay.")
+flags.DEFINE_integer(
+    "d_ff", None, "d_ff. This one takes precedence over `d_ff_to_d_model."
+)
+# Configs of the optimizer.
+flags.DEFINE_float("weight_decay", 0.001, "Weight decay.")
 flags.DEFINE_float("adamw_beta_1", 0.9, "AdamW beta_1.")
 flags.DEFINE_float("adamw_beta_2", 0.999, "AdamW beta_2.")
 flags.DEFINE_float("adamw_eps", 1e-8, "AdamW's eps.")
+flags.DEFINE_float("max_learning_rate", 2e-3, "Max learning rate.")
+flags.DEFINE_float("min_learning_rate", 1e-4, "Min learning rate.")
+flags.DEFINE_integer(
+    "lr_warmup_iters", 20, "Learning rate warm up number of iteration."
+)
+flags.DEFINE_integer(
+    "lr_cosine_cycle_iters", 100, "Learning rate cosine cycle number of iterations."
+)
 #  Configs of the checkpointing.
 flags.DEFINE_string("checkpoint_dir_path", "", "Path to the checkpoint directory.")
 flags.DEFINE_integer("max_num_checkpoints", None, "Max number of checkpoints to store.")
@@ -48,12 +58,15 @@ flags.DEFINE_integer("checkpoint_freq", None, "Checkpointing frequency.")
 # Configs of WANDB.
 flags.DEFINE_string("wandb_entity", "cs336-assignment-1", "wandb entity.")
 flags.DEFINE_string("wandb_project", "test_train", "wandb project.")
+flags.DEFINE_string("wandb_run_name", None, "wandb run name.")
 # Configs of training.
 flags.DEFINE_integer("num_steps", None, "Number of training steps.")
 flags.DEFINE_integer("batch_size", None, "Training batch size.")
 flags.DEFINE_integer("validation_batch_size", None, "Validation batch size.")
 flags.DEFINE_integer("validation_freq", None, "Validation frequency.")
-flags.DEFINE_string("device", None, "Device of the training.")
+flags.DEFINE_string("device", "cpu", "Device of the training.")
+# Gradient clipping
+flags.DEFINE_float("max_total_gradient_l2_norm", None, "Max total gradient L2 norm.")
 
 
 def _get_train_and_validaton_datasets() -> tuple[npt.NDArray, npt.NDArray]:
@@ -82,19 +95,21 @@ def _load_or_init_state(
             rope_theta=FLAGS.rope_theta,
             d_model=FLAGS.d_model,
             d_ff_to_d_model=FLAGS.d_ff_to_d_model,
+            d_ff=FLAGS.d_ff,
         ),
         device=FLAGS.device,
     )
     optimizer = optimizers.AdamW(
         model.parameters(),
-        lr=FLAGS.lr,
+        lr=FLAGS.min_learning_rate,
         weight_decay=FLAGS.weight_decay,
         betas=(FLAGS.adamw_beta_1, FLAGS.adamw_beta_2),
         eps=FLAGS.adamw_eps,
     )
     latest_checkpointed_iteration = checkpoint_manager.load_checkpoint(
-        model=model, optimizer=optimizer
+        model=model, optimizer=optimizer, device=FLAGS.device
     )
+    # model.to(FLAGS.device)
     return (model, optimizer, latest_checkpointed_iteration)
 
 
@@ -118,6 +133,14 @@ def main(argv):
             "Model and optimizer loaded from the latest checkpoint at iteration "
             f"{latest_checkpointed_iteration}."
         )
+    lr_scheduler = optimizers.CosineLrScheduler(
+        optimizer=optimizer,
+        max_learning_rate=FLAGS.max_learning_rate,
+        min_learning_rate=FLAGS.min_learning_rate,
+        warmup_iters=FLAGS.lr_warmup_iters,
+        cosine_cycle_iters=FLAGS.lr_cosine_cycle_iters,
+        last_epoch=latest_checkpointed_iteration - 1,
+    )
 
     logging.info(
         f"Mapping training and validation dataset from {FLAGS.training_dataset_path} and "
@@ -130,7 +153,8 @@ def main(argv):
     wandb_run = wandb.init(
         entity=FLAGS.wandb_entity,
         project=FLAGS.wandb_project,
-        config={"lr": FLAGS.lr, "dataset": "TinyStories"},
+        name=FLAGS.wandb_run_name,
+        config={"dataset": "TinyStories", "min_learning_rate": FLAGS.min_learning_rate},
     )
     logging.info("wandb run created.")
 
@@ -138,6 +162,7 @@ def main(argv):
     metric_history = train_model.train_loop(
         model=model,
         optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
         training_dataset=training_dataset,
         validation_dataset=validation_dataset,
         config=train_model.TrainingConfig(
@@ -147,6 +172,7 @@ def main(argv):
             checkpoint_freq=FLAGS.checkpoint_freq,
             validation_batch_size=FLAGS.validation_batch_size,
             validation_freq=FLAGS.validation_freq,
+            max_total_gradient_l2_norm=FLAGS.max_total_gradient_l2_norm,
             device=FLAGS.device,
         ),
         checkpoint_manager=checkpoint_manager,

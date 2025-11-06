@@ -44,6 +44,7 @@ def load_checkpoint(
     src: str | os.PathLike | typing.BinaryIO | typing.IO[bytes],
     model: nn.Module,
     optimizer: optim.Optimizer,
+    device: torch.device | None = None,
 ) -> int:
     """
     Given a serialized checkpoint (path or file-like object), restore the
@@ -58,7 +59,7 @@ def load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    checkpoint_data = torch.load(src)
+    checkpoint_data = torch.load(src, map_location=device)
     assert "iteration" in checkpoint_data, "`iteration` not found in checkpoint data."
     assert "model" in checkpoint_data, "`model` not found in checkpoint data."
     assert "optimizer" in checkpoint_data, "`optimizer` not found in checkpoint data."
@@ -85,8 +86,11 @@ class CheckpointManager:
     def __init__(self, checkpoint_dir: str, max_num_checkpoints: int):
         self.checkpoint_dir = pathlib.Path(checkpoint_dir)
         assert (
-            self.checkpoint_dir.is_dir()
-        ), f"The checkpoint dir {checkpoint_dir} is not a directory."
+            not self.checkpoint_dir.is_file()
+        ), f"The checkpoint dir {checkpoint_dir} cannot be a file."
+        if not self.checkpoint_dir.exists():
+            os.makedirs(self.checkpoint_dir)
+
         self.metadata_file = self.checkpoint_dir / "METADATA"
         if self.metadata_file.exists():
             with open(self.metadata_file, "rb") as f:
@@ -139,7 +143,11 @@ class CheckpointManager:
         self._trim_checkpoint_files()
 
     def load_checkpoint(
-        self, model: nn.Module, optimizer: optim.Optimizer, iteration: int | None = None
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        iteration: int | None = None,
+        device: torch.device | None = None,
     ) -> int:
         """Loads a checkpoint."""
         if iteration is None:
@@ -148,7 +156,10 @@ class CheckpointManager:
             return 0
         src_filename = self.checkpoint_metadata.iteration_to_filename[iteration]
         iteration_from_ckpt = load_checkpoint(
-            src=self.checkpoint_dir / src_filename, model=model, optimizer=optimizer
+            src=self.checkpoint_dir / src_filename,
+            model=model,
+            optimizer=optimizer,
+            device=device,
         )
         assert iteration == iteration_from_ckpt, (
             f"Checkpoint data corrupted. Expected iteration from metadata: {iteration}, but "
