@@ -133,13 +133,16 @@ def _load_or_init_state(
         betas=(FLAGS.adamw_beta_1, FLAGS.adamw_beta_2),
         eps=FLAGS.adamw_eps,
     )
-    latest_checkpointed_iteration = checkpoint_manager.load_checkpoint(
-        model=model, optimizer=optimizer, device=FLAGS.device
-    )
+    # `torch.compile` will change the keys in the state_dict (prepending by `_orig_mod_`), so we
+    # need to compile the mode before loading checkpoints.
     if FLAGS.device.startswith("mps"):
         model = torch.compile(model, backend="aot_eager")
     else:
         model = torch.compile(model)
+
+    latest_checkpointed_iteration = checkpoint_manager.load_checkpoint(
+        model=model, optimizer=optimizer, device=FLAGS.device
+    )
     return (model, optimizer, latest_checkpointed_iteration)
 
 
