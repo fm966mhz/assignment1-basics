@@ -74,7 +74,6 @@ $TRAIN_CMD  \
 	--num_heads=${NUM_HEADS} \
 	--rope_theta=${ROPE_THETA} \
 	--d_model=${D_MODEL} \
-	--d_ff_to_d_model=${D_FF_TO_D_MODEL} \
     --d_ff=${D_FF} \
     --dtype=${DTYPE} \
 	--weight_decay=${WEIGHT_DECAY} \

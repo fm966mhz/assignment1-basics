@@ -190,7 +190,7 @@ def clip_gradient(
 
     The gradients of the parameters (parameter.grad) are modified in-place.
     """
-    l2_norm = get_total_gradient_l2_norm(parameters, device)
+    l2_norm = get_total_gradient_l2_norm(parameters)
     if l2_norm <= max_l2_norm:
         return
     scaling_factor = max_l2_norm / (l2_norm + eps)
@@ -200,13 +200,11 @@ def clip_gradient(
         p.grad.data *= scaling_factor
 
 
-def get_total_gradient_l2_norm(
-    parameters: Iterable[nn.Parameter], device: torch.device | None = None
-) -> float:
+def get_total_gradient_l2_norm(parameters: Iterable[nn.Parameter]) -> float:
     """Gets the total gradient l2 norm."""
-    l2_norm_squared = torch.zeros((), device=device)
+    l2_norm_squared = torch.zeros(())
     for p in parameters:
         if p.grad is None:
             continue
-        l2_norm_squared += torch.sum(p.grad.data**2)
-    return torch.sqrt(l2_norm_squared).cpu().item()
+        l2_norm_squared += torch.sum(p.grad.detach().cpu().data ** 2)
+    return torch.sqrt(l2_norm_squared).item()

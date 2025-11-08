@@ -87,7 +87,7 @@ def train_loop(
                     "training_loss": loss_val,
                     "lr": optimizer.param_groups[0]["lr"],
                     "total_gradient_l2_norm": get_total_gradient_l2_norm(
-                        model.parameters(), device=config.device
+                        model.parameters()
                     ),
                 },
                 step=t + 1,
@@ -97,7 +97,6 @@ def train_loop(
             clip_gradient(
                 model.parameters(),
                 max_l2_norm=config.max_total_gradient_l2_norm,
-                device=config.device,
             )
         optimizer.step()
         lr_scheduler.step()
@@ -119,6 +118,7 @@ def train_loop(
                     f"Iteration {t+1}. Training loss: {loss_val}. Validation loss: "
                     f"{validation_loss}. Validation perplexity: {validation_perplexity}."
                 )
+            del validation_loss, validation_perplexity
 
         if checkpoint_manager and (
             (t + 1 - latest_checkpointed_iteration) % config.checkpoint_freq == 0
@@ -126,6 +126,8 @@ def train_loop(
             checkpoint_manager.save_checkpoint(
                 model=model, optimizer=optimizer, iteration=t + 1
             )
+
+        del loss, loss_val
     return metric_history
 
 
