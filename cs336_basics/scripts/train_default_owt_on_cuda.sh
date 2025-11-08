@@ -21,6 +21,13 @@ NUM_HEADS=32
 ROPE_THETA=10000.0
 D_MODEL=1024
 D_FF=2752
+# Manually using `bfloat16` seems brittle and is giving me
+# """"
+#   torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+#   RuntimeError: expected scalar type Float but found BFloat16
+# """"
+# Should try `torch.amp.autocast` first.
+DTYPE="float32"
 
 # Optimizer / LR configs (placeholders).
 WEIGHT_DECAY=0.001
@@ -43,7 +50,7 @@ WANDB_PROJECT="cs336-assignment-1"
 WANDB_RUN_NAME="${EXP_NAME}"
 
 # Training config placeholders
-NUM_STEPS=21700
+NUM_STEPS=22000
 BATCH_SIZE=12
 VALIDATION_BATCH_SIZE=64
 VALIDATION_FREQ=25
@@ -69,6 +76,7 @@ $TRAIN_CMD  \
 	--d_model=${D_MODEL} \
 	--d_ff_to_d_model=${D_FF_TO_D_MODEL} \
     --d_ff=${D_FF} \
+    --dtype=${DTYPE} \
 	--weight_decay=${WEIGHT_DECAY} \
 	--adamw_beta_1=${ADAMW_BETA_1} \
 	--adamw_beta_2=${ADAMW_BETA_2} \
