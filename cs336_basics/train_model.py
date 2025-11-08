@@ -44,8 +44,8 @@ def train_loop(
     training_dataset: npt.NDArray,
     validation_dataset: npt.NDArray,
     config: TrainingConfig,
-    checkpoint_manager: CheckpointManager,
-    wandb_run: wandb.Run,
+    checkpoint_manager: CheckpointManager | None = None,
+    wandb_run: wandb.Run | None = None,
     log_metrics_to_console: bool = False,
 ) -> dict[str, list[float]]:
     """The main training loop."""
@@ -56,6 +56,8 @@ def train_loop(
     }
     latest_checkpointed_iteration = (
         checkpoint_manager.checkpoint_metadata.latest_checkpointed_iteration
+        if checkpoint_manager is not None
+        else 0
     )
     for t in tqdm(
         range(
@@ -100,7 +102,9 @@ def train_loop(
         optimizer.step()
         lr_scheduler.step()
 
-        if (t + 1 - latest_checkpointed_iteration) % config.validation_freq == 0:
+        if wandb_run and (
+            (t + 1 - latest_checkpointed_iteration) % config.validation_freq == 0
+        ):
             validation_loss, validation_perplexity = run_validation(
                 model=model,
                 validation_dataset=validation_dataset,
@@ -116,7 +120,9 @@ def train_loop(
                     f"{validation_loss}. Validation perplexity: {validation_perplexity}."
                 )
 
-        if (t + 1 - latest_checkpointed_iteration) % config.checkpoint_freq == 0:
+        if checkpoint_manager and (
+            (t + 1 - latest_checkpointed_iteration) % config.checkpoint_freq == 0
+        ):
             checkpoint_manager.save_checkpoint(
                 model=model, optimizer=optimizer, iteration=t + 1
             )
@@ -127,7 +133,7 @@ def run_validation(
     model: nn.Module,
     validation_dataset: npt.NDArray,
     config: TrainingConfig,
-    wandb_run: wandb.Run,
+    wandb_run: wandb.Run | None,
     step: int,
 ) -> tuple[float, float]:
     """Runs valiation.

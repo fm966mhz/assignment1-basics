@@ -1,6 +1,6 @@
-"""Train a Transfomer LM."""
+"""Transformer LM hyperparameters sweep using wandb."""
 
-import pickle
+import random
 
 from typing import Any
 
@@ -16,11 +16,9 @@ from torch import optim
 
 import wandb
 
-from cs336_basics import checkpoint
 from cs336_basics import optimizers
 from cs336_basics import train_model
 from cs336_basics import transformer
-
 
 FLAGS = flags.FLAGS
 
@@ -29,8 +27,6 @@ flags.DEFINE_string("training_dataset_path", "", "The training data path.")
 flags.DEFINE_string(
     "validation_dataset_path", "", "The path to the validation dataset."
 )
-# Output paths.
-flags.DEFINE_string("metric_history_dump_path", "", "Path to the metric history dump.")
 # Configs of the transformer.
 flags.DEFINE_integer("vocab_size", None, "The vocab size.")
 flags.DEFINE_integer("max_context_length", None, "The max context length.")
@@ -44,26 +40,18 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_enum("dtype", "float32", ["float32", "bfloat16"], "dtype.")
 # Configs of the optimizer.
+# Note that learning rates are not defined as flags since they will be swept.
 flags.DEFINE_float("weight_decay", 0.001, "Weight decay.")
 flags.DEFINE_float("adamw_beta_1", 0.9, "AdamW beta_1.")
 flags.DEFINE_float("adamw_beta_2", 0.999, "AdamW beta_2.")
 flags.DEFINE_float("adamw_eps", 1e-8, "AdamW's eps.")
-flags.DEFINE_float("max_learning_rate", 2e-3, "Max learning rate.")
-flags.DEFINE_float("min_learning_rate", 1e-4, "Min learning rate.")
-flags.DEFINE_integer(
-    "lr_warmup_iters", 20, "Learning rate warm up number of iteration."
-)
-flags.DEFINE_integer(
-    "lr_cosine_cycle_iters", 100, "Learning rate cosine cycle number of iterations."
-)
-#  Configs of the checkpointing.
-flags.DEFINE_string("checkpoint_dir_path", "", "Path to the checkpoint directory.")
-flags.DEFINE_integer("max_num_checkpoints", None, "Max number of checkpoints to store.")
-flags.DEFINE_integer("checkpoint_freq", None, "Checkpointing frequency.")
 # Configs of WANDB.
 flags.DEFINE_string("wandb_entity", "cs336-assignment-1", "wandb entity.")
 flags.DEFINE_string("wandb_project", "test_train", "wandb project.")
-flags.DEFINE_string("wandb_run_name", None, "wandb run name.")
+flags.DEFINE_enum(
+    "wandb_sweep_method", "random", ["grid", "random", "bayes"], "Wandb sweep method."
+)
+flags.DEFINE_string("wandb_sweep_name", None, "Wandb sweep name.")
 # Configs of training.
 flags.DEFINE_integer("num_steps", None, "Number of training steps.")
 flags.DEFINE_integer("batch_size", None, "Training batch size.")
@@ -77,8 +65,8 @@ flags.DEFINE_bool("log_metrics_to_console", False, "Log metrics to the console."
 
 
 def _get_dtype() -> torch.dtype:
-    _dtype_map = {"float32": torch.float32, "bfloat16": torch.bfloat16}
-    return _dtype_map[FLAGS.dtype]
+    _DTYPE_MAP = {"float32": torch.float32, "bfloat16": torch.bfloat16}
+    return _DTYPE_MAP[FLAGS.dtype]
 
 
 def _get_train_and_validaton_datasets() -> tuple[npt.NDArray, npt.NDArray]:
@@ -88,44 +76,12 @@ def _get_train_and_validaton_datasets() -> tuple[npt.NDArray, npt.NDArray]:
     )
 
 
-def _load_or_create_checkpoint_manager() -> checkpoint.CheckpointManager:
-    return checkpoint.CheckpointManager(
-        checkpoint_dir=FLAGS.checkpoint_dir_path,
-        max_num_checkpoints=FLAGS.max_num_checkpoints,
-    )
-
-
-def _get_wandb_config() -> dict[str, Any]:
-    return {
-        "vocab_size": FLAGS.vocab_size,
-        "max_content_length": FLAGS.max_context_length,
-        "num_layers": FLAGS.num_layers,
-        "num_heads": FLAGS.num_heads,
-        "rope_theta": FLAGS.rope_theta,
-        "d_model": FLAGS.d_model,
-        "d_ff": FLAGS.d_ff,
-        "d_ff_to_d_model": FLAGS.d_ff_to_d_model,
-        "dtype": FLAGS.dtype,
-        "weight_decay": FLAGS.weight_decay,
-        "adamw_beta_1": FLAGS.adamw_beta_1,
-        "adamw_beta_2": FLAGS.adamw_beta_2,
-        "max_learning_rate": FLAGS.max_learning_rate,
-        "min_learning_rate": FLAGS.min_learning_rate,
-        "lr_warmup_iters": FLAGS.lr_warmup_iters,
-        "lr_cosine_cycle_iters": FLAGS.lr_cosine_cycle_iters,
-        "num_steps": FLAGS.num_steps,
-        "batch_size": FLAGS.batch_size,
-    }
-
-
 def _global_performance_tuning() -> None:
     if FLAGS.device.startswith("cuda"):
         torch.set_float32_matmul_precision("high")
 
 
-def _load_or_init_state(
-    checkpoint_manager: checkpoint.CheckpointManager,
-) -> tuple[nn.Module, optim.Optimizer, int]:
+def _init_state(min_learning_rate: float) -> tuple[nn.Module, optim.Optimizer, int]:
     model = transformer.TransformerLm(
         transformer.TransformerConfig(
             vocab_size=FLAGS.vocab_size,
@@ -142,7 +98,7 @@ def _load_or_init_state(
     )
     optimizer = optimizers.AdamW(
         model.parameters(),
-        lr=FLAGS.min_learning_rate,
+        lr=min_learning_rate,
         weight_decay=FLAGS.weight_decay,
         betas=(FLAGS.adamw_beta_1, FLAGS.adamw_beta_2),
         eps=FLAGS.adamw_eps,
@@ -154,42 +110,36 @@ def _load_or_init_state(
     else:
         model = torch.compile(model)
 
-    latest_checkpointed_iteration = checkpoint_manager.load_checkpoint(
-        model=model, optimizer=optimizer, device=FLAGS.device
+    return (model, optimizer, 0)
+
+
+def train_and_get_validation_loss() -> None:
+    """Trains a Transformer LM and returns its validation loss."""
+    # Fix all the random seeds.
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
+    random.seed(42)
+    np.random.seed(42)
+
+    logging.info("Creating wandb run...")
+    wandb_run = wandb.init(
+        entity=FLAGS.wandb_entity,
+        project=FLAGS.wandb_project,
     )
-    return (model, optimizer, latest_checkpointed_iteration)
+    logging.info(f"wandb run created. Run config: {wandb_run.config}.")
 
+    logging.info("Init model and optimizer...")
+    model, optimizer, _ = _init_state(wandb_run.config["min_learning_rate"])
+    logging.info("Model and optimizer initialized.")
 
-def main(argv):
-    """Runs the training."""
-    if len(argv) > 1:
-        raise app.UsageError("Too many command-line args,")
-
-    # Global performance tuning.
-    _global_performance_tuning()
-
-    logging.info(f"Loading checkpoint from {FLAGS.checkpoint_dir_path}...")
-    checkpoint_manager = _load_or_create_checkpoint_manager()
-    model, optimizer, latest_checkpointed_iteration = _load_or_init_state(
-        checkpoint_manager=checkpoint_manager
-    )
-    if latest_checkpointed_iteration == 0:
-        logging.info(
-            f"No existing checkpoints in {FLAGS.checkpoint_dir_path}. Model and optimizer "
-            "initialized."
-        )
-    else:
-        logging.info(
-            "Model and optimizer loaded from the latest checkpoint at iteration "
-            f"{latest_checkpointed_iteration}."
-        )
     lr_scheduler = optimizers.CosineLrScheduler(
         optimizer=optimizer,
-        max_learning_rate=FLAGS.max_learning_rate,
-        min_learning_rate=FLAGS.min_learning_rate,
-        warmup_iters=FLAGS.lr_warmup_iters,
-        cosine_cycle_iters=FLAGS.lr_cosine_cycle_iters,
-        last_epoch=latest_checkpointed_iteration - 1,
+        max_learning_rate=wandb_run.config["max_learning_rate"],
+        min_learning_rate=wandb_run.config["min_learning_rate"],
+        warmup_iters=wandb_run.config["lr_warmup_iters"],
+        cosine_cycle_iters=wandb_run.config["lr_cosine_cycle_iters"],
+        last_epoch=-1,
     )
 
     logging.info(
@@ -199,17 +149,8 @@ def main(argv):
     training_dataset, validation_dataset = _get_train_and_validaton_datasets()
     logging.info("Training and validation datasets created.")
 
-    logging.info("Creating wandb run...")
-    wandb_run = wandb.init(
-        entity=FLAGS.wandb_entity,
-        project=FLAGS.wandb_project,
-        name=FLAGS.wandb_run_name,
-        config=_get_wandb_config(),
-    )
-    logging.info("wandb run created.")
-
     logging.info(f"Running main training loop for {FLAGS.num_steps} steps...")
-    metric_history = train_model.train_loop(
+    train_model.train_loop(
         model=model,
         optimizer=optimizer,
         lr_scheduler=lr_scheduler,
@@ -219,20 +160,46 @@ def main(argv):
             num_steps=FLAGS.num_steps,
             training_batch_size=FLAGS.batch_size,
             context_length=FLAGS.max_context_length,
-            checkpoint_freq=FLAGS.checkpoint_freq,
+            checkpoint_freq=1_000,
             validation_batch_size=FLAGS.validation_batch_size,
             validation_freq=FLAGS.validation_freq,
             max_total_gradient_l2_norm=FLAGS.max_total_gradient_l2_norm,
             device=FLAGS.device,
         ),
-        checkpoint_manager=checkpoint_manager,
+        checkpoint_manager=None,
         wandb_run=wandb_run,
         log_metrics_to_console=FLAGS.log_metrics_to_console,
     )
     logging.info("Main training loop completed.")
     wandb_run.finish()
-    with open(FLAGS.metric_history_dump_path, "wb") as f:
-        pickle.dump(metric_history, f)
+
+
+def main(argv):
+    """Runs the sweep."""
+    if len(argv) > 1:
+        raise app.UsageError("Too many command-line args,")
+
+    # Global performance tuning.
+    _global_performance_tuning()
+
+    sweep_configuration = {
+        "method": FLAGS.wandb_sweep_method,
+        "name": FLAGS.wandb_sweep_name,
+        "metric": {"goal": "minimize", "name": "validation_loss"},
+        "parameters": {
+            "max_learning_rate": {"max": 2e-2, "min": 5e-4},
+            "min_learning_rate": {"max": 2e-4, "min": 1e-5},
+            "lr_warmup_iters": {"values": [50, 100, 150, 200]},
+            "lr_cosine_cycle_iters": {"values": [4000, 5000, 6000, 7000]},
+        },
+    }
+
+    sweep_id = wandb.sweep(
+        sweep=sweep_configuration,
+        project=FLAGS.wandb_project,
+    )
+
+    wandb.agent(sweep_id=sweep_id, function=train_and_get_validation_loss, count=20)
 
 
 if __name__ == "__main__":
