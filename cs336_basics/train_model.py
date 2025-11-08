@@ -87,7 +87,7 @@ def train_loop(
                     "training_loss": loss_val,
                     "lr": optimizer.param_groups[0]["lr"],
                     "total_gradient_l2_norm": get_total_gradient_l2_norm(
-                        model.parameters()
+                        model.parameters(), device=config.device
                     ),
                 },
                 step=t + 1,
@@ -97,6 +97,7 @@ def train_loop(
             clip_gradient(
                 model.parameters(),
                 max_l2_norm=config.max_total_gradient_l2_norm,
+                device=config.device,
             )
         optimizer.step()
         lr_scheduler.step()
