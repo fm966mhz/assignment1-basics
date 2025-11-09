@@ -30,14 +30,30 @@ def save_checkpoint(
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the
             model, optimizer, and iteration to.
     """
+    model_state = model.state_dict()
+    optimizer_state = optimizer.state_dict()
+    cpu_model_state = {k: v.cpu() for k, v in model_state.items()}
+    cpu_optimizer_state = {
+        "state": {},
+        "param_groups": optimizer_state["param_groups"],
+    }
+    for param_id, state in optimizer_state["state"].items():
+        cpu_optimizer_state["state"][param_id] = {}
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                cpu_optimizer_state["state"][param_id][k] = v.cpu()
+            else:
+                cpu_optimizer_state["state"][param_id][k] = v
+
     torch.save(
         {
             "iteration": iteration,
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
+            "model": cpu_model_state,
+            "optimizer": cpu_optimizer_state,
         },
         out,
     )
+    del model_state, optimizer_state, cpu_model_state, cpu_optimizer_state
 
 
 def load_checkpoint(
