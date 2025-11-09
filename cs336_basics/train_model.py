@@ -58,6 +58,7 @@ def train_loop(
     scaler = (
         torch.amp.grad_scaler.GradScaler() if config.device.startswith("cuda") else None
     )
+    logging.info(f"Use AMP GradScaler: {scaler}.")
     for t in tqdm(
         range(
             latest_checkpointed_iteration,
@@ -73,7 +74,7 @@ def train_loop(
             device=config.device,
         )
         # Forward pass.
-        if config.device.startswith("cudda"):
+        if config.device.startswith("cuda"):
             with torch.autocast(device_type=config.device, dtype=dtype):
                 logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(
                     input_seq
