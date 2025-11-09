@@ -141,7 +141,7 @@ def run_validation(
     config: TrainingConfig,
     wandb_run: wandb.Run | None,
     step: int,
-) -> tuple[float, float]:
+):
     """Runs valiation.
 
     Returns the validation loss and perplexity.
@@ -165,4 +165,4 @@ def run_validation(
             },
             step=step,
         )
-    return loss, perplexity
+    del input_seq, label_seq, logits, loss, perplexity
