@@ -4,14 +4,11 @@ set -euo pipefail
 
 # Note: BASE_DIR is the script path; change to dirname if you want the script directory.
 BASE_DIR="$1"
-EXP_NAME="default_owt_on_5080_test"
+EXP_NAME="default_owt_on_5080_debug_memory"
 
 # Input data.
 TRAINING_DATASET_PATH="${BASE_DIR}/data/owt_train_tokens.npy"
 VALIDATION_DATASET_PATH="${BASE_DIR}/data/owt_valid_tokens.npy"
-
-# Output paths.
-METRIC_HISTORY_DUMP_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/metric_history.pkl"
 
 # Configs of the transformer (placeholders - edit as needed).
 VOCAB_SIZE=32000
@@ -27,7 +24,7 @@ D_FF=1408
 #   RuntimeError: expected scalar type Float but found BFloat16
 # """"
 # Should try `torch.amp.autocast` first.
-DTYPE="float32"
+DTYPE="bfloat16"
 
 # Optimizer / LR configs (placeholders).
 WEIGHT_DECAY=0.001
@@ -36,8 +33,8 @@ ADAMW_BETA_2=0.999
 ADAMW_EPS=1e-8
 MAX_LEARNING_RATE=0.002
 MIN_LEARNING_RATE=0.0001
-LR_WARMUP_ITERS=500
-LR_COSINE_CYCLE_ITERS=21700
+LR_WARMUP_ITERS=1000
+LR_COSINE_CYCLE_ITERS=21000
 
 # Checkpointing (placeholders).
 CHECKPOINT_DIR_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/checkpoint"
@@ -61,13 +58,13 @@ MAX_TOTAL_GRADIENT_L2_NORM=4.0
 
 # Misc
 LOG_METRICS_TO_CONSOLE=false
+TORCH_CUDA_EMPTY_CACHE=false
 
 TRAIN_CMD="uv run cs336_basics/train_transformer_lm_main.py"
 
 $TRAIN_CMD  \
 	--training_dataset_path="${TRAINING_DATASET_PATH}" \
 	--validation_dataset_path="${VALIDATION_DATASET_PATH}" \
-	--metric_history_dump_path="${METRIC_HISTORY_DUMP_PATH}" \
 	--vocab_size=${VOCAB_SIZE} \
 	--max_context_length=${MAX_CONTEXT_LENGTH} \
 	--num_layers=${NUM_LAYERS} \
@@ -96,5 +93,5 @@ $TRAIN_CMD  \
 	--validation_freq=${VALIDATION_FREQ} \
 	--device="${DEVICE}" \
 	--log_metrics_to_console=${LOG_METRICS_TO_CONSOLE} \
-	--max_total_gradient_l2_norm=${MAX_TOTAL_GRADIENT_L2_NORM}
+	--torch_cuda_empty_cache=${TORCH_CUDA_EMPTY_CACHE}
 

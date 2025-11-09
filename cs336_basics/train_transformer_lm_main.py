@@ -29,8 +29,6 @@ flags.DEFINE_string("training_dataset_path", "", "The training data path.")
 flags.DEFINE_string(
     "validation_dataset_path", "", "The path to the validation dataset."
 )
-# Output paths.
-flags.DEFINE_string("metric_history_dump_path", "", "Path to the metric history dump.")
 # Configs of the transformer.
 flags.DEFINE_integer("vocab_size", None, "The vocab size.")
 flags.DEFINE_integer("max_context_length", None, "The max context length.")
@@ -74,6 +72,9 @@ flags.DEFINE_string("device", "cpu", "Device of the training.")
 flags.DEFINE_float("max_total_gradient_l2_norm", None, "Max total gradient L2 norm.")
 # Misc
 flags.DEFINE_bool("log_metrics_to_console", False, "Log metrics to the console.")
+flags.DEFINE_bool(
+    "torch_cuda_empty_cache", False, "If true, aggresively empty CUDA cache."
+)
 
 
 def _get_dtype() -> torch.dtype:
@@ -208,7 +209,7 @@ def main(argv):
     logging.info("wandb run created.")
 
     logging.info(f"Running main training loop for {FLAGS.num_steps} steps...")
-    metric_history = train_model.train_loop(
+    train_model.train_loop(
         model=model,
         optimizer=optimizer,
         lr_scheduler=lr_scheduler,
@@ -228,11 +229,10 @@ def main(argv):
         checkpoint_manager=checkpoint_manager,
         wandb_run=wandb_run,
         log_metrics_to_console=FLAGS.log_metrics_to_console,
+        torch_cuda_empty_cache=FLAGS.torch_cuda_empty_cache,
     )
     logging.info("Main training loop completed.")
     wandb_run.finish()
-    with open(FLAGS.metric_history_dump_path, "wb") as f:
-        pickle.dump(metric_history, f)
 
 
 if __name__ == "__main__":

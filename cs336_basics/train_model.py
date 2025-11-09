@@ -16,8 +16,6 @@ from tqdm import tqdm
 from cs336_basics.checkpoint import CheckpointManager
 from cs336_basics.data_loader import get_batch
 from cs336_basics.functions import cross_entropy
-from cs336_basics.optimizers import clip_gradient
-from cs336_basics.optimizers import get_total_gradient_l2_norm
 
 
 @dataclass(frozen=True)
@@ -48,6 +46,7 @@ def train_loop(
     checkpoint_manager: CheckpointManager | None = None,
     wandb_run: wandb.Run | None = None,
     log_metrics_to_console: bool = False,
+    torch_cuda_empty_cache: bool = False,
 ):
     """The main training loop."""
     latest_checkpointed_iteration = (
@@ -62,8 +61,10 @@ def train_loop(
     for t in tqdm(
         range(
             latest_checkpointed_iteration,
-            latest_checkpointed_iteration + config.num_steps,
-        )
+            config.num_steps,
+        ),
+        initial=latest_checkpointed_iteration,
+        total=config.num_steps,
     ):
         optimizer.zero_grad()
         # TODO(djwenren): pinning CPU memories?
@@ -95,9 +96,6 @@ def train_loop(
                 {
                     "training_loss": loss_val,
                     "lr": optimizer.param_groups[0]["lr"],
-                    "total_gradient_l2_norm": get_total_gradient_l2_norm(
-                        model.parameters(), device=torch.device(config.device)
-                    ),
                 },
                 step=t + 1,
             )
@@ -111,23 +109,20 @@ def train_loop(
             loss.backward()
             optimizer.step()
         lr_scheduler.step()
+        del loss, loss_val
 
         if wandb_run and (
             (t + 1 - latest_checkpointed_iteration) % config.validation_freq == 0
         ):
-            validation_loss, validation_perplexity = run_validation(
+            if str(config.device).startswith("cuda") and torch_cuda_empty_cache:
+                torch.cuda.empty_cache()
+            run_validation(
                 model=model,
                 validation_dataset=validation_dataset,
                 config=config,
                 wandb_run=wandb_run,
                 step=t + 1,
             )
-            if log_metrics_to_console:
-                logging.info(
-                    f"Iteration {t+1}. Training loss: {loss_val}. Validation loss: "
-                    f"{validation_loss}. Validation perplexity: {validation_perplexity}."
-                )
-            del validation_loss, validation_perplexity
 
         if checkpoint_manager and (
             (t + 1 - latest_checkpointed_iteration) % config.checkpoint_freq == 0
@@ -136,8 +131,7 @@ def train_loop(
                 model=model, optimizer=optimizer, iteration=t + 1
             )
 
-        del loss, loss_val
-        if str(config.device).startswith("cuda"):
+        if str(config.device).startswith("cuda") and torch_cuda_empty_cache:
             torch.cuda.empty_cache()
 
 
