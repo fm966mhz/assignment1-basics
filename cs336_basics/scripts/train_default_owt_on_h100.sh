@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Note: BASE_DIR is the script path; change to dirname if you want the script directory.
 BASE_DIR="$1"
-EXP_NAME="default_owt_on_h100_test_amp"
+EXP_NAME="default_owt_on_h100_yolo"
 
 # Input data.
 TRAINING_DATASET_PATH="${BASE_DIR}/data/owt_train_tokens.npy"
@@ -39,7 +39,7 @@ LR_COSINE_CYCLE_ITERS=20000
 # Checkpointing (placeholders).
 CHECKPOINT_DIR_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/checkpoint"
 MAX_NUM_CHECKPOINTS=5
-CHECKPOINT_FREQ=40
+CHECKPOINT_FREQ=50
 
 # WANDB (placeholders)
 WANDB_ENTITY="fm966hz"
@@ -48,7 +48,7 @@ WANDB_RUN_NAME="${EXP_NAME}"
 
 # Training config placeholders
 NUM_STEPS=22000
-BATCH_SIZE=24
+BATCH_SIZE=32
 VALIDATION_BATCH_SIZE=64
 VALIDATION_FREQ=100
 DEVICE="cuda:0"
