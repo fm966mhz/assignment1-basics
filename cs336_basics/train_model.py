@@ -75,6 +75,10 @@ def train_loop(
         )
         # Forward pass.
         if config.device.startswith("cuda"):
+            if t == latest_checkpointed_iteration:
+                logging.info(
+                    f"Training using autocast with device type {config.device}, dtype: {dtype}."
+                )
             with torch.autocast(device_type=config.device, dtype=dtype):
                 logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(
                     input_seq
@@ -86,12 +90,6 @@ def train_loop(
             )
             loss = cross_entropy(logits=logits, targets=label_seq)
         loss_val = loss.detach().cpu().item()
-
-        # Backward pass.
-        if scaler:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
         if wandb_run is not None:
             wandb_run.log(
                 {
@@ -104,10 +102,13 @@ def train_loop(
                 step=t + 1,
             )
 
+        # Backward pass.
         if scaler:
+            scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
         else:
+            loss.backward()
             optimizer.step()
         lr_scheduler.step()
 
