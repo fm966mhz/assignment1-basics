@@ -109,7 +109,7 @@ def train_loop(
             loss.backward()
             optimizer.step()
         lr_scheduler.step()
-        del loss, loss_val
+        del loss, loss_val, logits, input_seq, label_seq
 
         if wandb_run and (
             (t + 1 - latest_checkpointed_iteration) % config.validation_freq == 0
