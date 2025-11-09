@@ -4,7 +4,7 @@ set -euo pipefail
 
 # Note: BASE_DIR is the script path; change to dirname if you want the script directory.
 BASE_DIR="$1"
-EXP_NAME="default_owt_on_h100_yolo"
+EXP_NAME="default_owt_on_h100_yolo_after_memory_fix"
 
 # Input data.
 TRAINING_DATASET_PATH="${BASE_DIR}/data/owt_train_tokens.npy"
@@ -48,7 +48,7 @@ WANDB_RUN_NAME="${EXP_NAME}"
 
 # Training config placeholders
 NUM_STEPS=22000
-BATCH_SIZE=32
+BATCH_SIZE=16
 VALIDATION_BATCH_SIZE=64
 VALIDATION_FREQ=100
 DEVICE="cuda:0"
@@ -58,6 +58,7 @@ MAX_TOTAL_GRADIENT_L2_NORM=4.0
 
 # Misc
 LOG_METRICS_TO_CONSOLE=false
+TORCH_CUDA_EMPTY_CACHE=false
 
 TRAIN_CMD="uv run cs336_basics/train_transformer_lm_main.py"
 
@@ -92,5 +93,6 @@ $TRAIN_CMD  \
 	--validation_freq=${VALIDATION_FREQ} \
 	--device="${DEVICE}" \
 	--log_metrics_to_console=${LOG_METRICS_TO_CONSOLE} \
-	--max_total_gradient_l2_norm=${MAX_TOTAL_GRADIENT_L2_NORM}
+	--torch_cuda_empty_cache=${TORCH_CUDA_EMPTY_CACHE}
+
 
