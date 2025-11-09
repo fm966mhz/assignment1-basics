@@ -4,14 +4,11 @@ set -euo pipefail
 
 # Note: BASE_DIR is the script path; change to dirname if you want the script directory.
 BASE_DIR="$1"
-EXP_NAME="default_owt_on_cuda"
+EXP_NAME="default_owt_on_h100_test_amp"
 
 # Input data.
 TRAINING_DATASET_PATH="${BASE_DIR}/data/owt_train_tokens.npy"
 VALIDATION_DATASET_PATH="${BASE_DIR}/data/owt_valid_tokens.npy"
-
-# Output paths.
-METRIC_HISTORY_DUMP_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/metric_history.pkl"
 
 # Configs of the transformer (placeholders - edit as needed).
 VOCAB_SIZE=32000
@@ -27,7 +24,7 @@ D_FF=2752
 #   RuntimeError: expected scalar type Float but found BFloat16
 # """"
 # Should try `torch.amp.autocast` first.
-DTYPE="float32"
+DTYPE="bfloat16"
 
 # Optimizer / LR configs (placeholders).
 WEIGHT_DECAY=0.001
@@ -53,7 +50,7 @@ WANDB_RUN_NAME="${EXP_NAME}"
 NUM_STEPS=22000
 BATCH_SIZE=12
 VALIDATION_BATCH_SIZE=64
-VALIDATION_FREQ=25
+VALIDATION_FREQ=100
 DEVICE="cuda:0"
 
 # Gradient clipping
@@ -67,7 +64,6 @@ TRAIN_CMD="uv run cs336_basics/train_transformer_lm_main.py"
 $TRAIN_CMD  \
 	--training_dataset_path="${TRAINING_DATASET_PATH}" \
 	--validation_dataset_path="${VALIDATION_DATASET_PATH}" \
-	--metric_history_dump_path="${METRIC_HISTORY_DUMP_PATH}" \
 	--vocab_size=${VOCAB_SIZE} \
 	--max_context_length=${MAX_CONTEXT_LENGTH} \
 	--num_layers=${NUM_LAYERS} \

@@ -32,9 +32,9 @@ class TrainingConfig:
     validation_batch_size: int
     validation_freq: int
 
-    max_total_gradient_l2_norm: float | None = None
+    device: str
 
-    device: torch.device | None = None
+    max_total_gradient_l2_norm: float | None = None
 
 
 def train_loop(
@@ -44,20 +44,19 @@ def train_loop(
     training_dataset: npt.NDArray,
     validation_dataset: npt.NDArray,
     config: TrainingConfig,
+    dtype: torch.dtype,
     checkpoint_manager: CheckpointManager | None = None,
     wandb_run: wandb.Run | None = None,
     log_metrics_to_console: bool = False,
-) -> dict[str, list[float]]:
+):
     """The main training loop."""
-    metric_history = {
-        "training_loss": [],
-        "validation_loss": [],
-        "validation_perplexity": [],
-    }
     latest_checkpointed_iteration = (
         checkpoint_manager.checkpoint_metadata.latest_checkpointed_iteration
         if checkpoint_manager is not None
         else 0
+    )
+    scaler = (
+        torch.amp.grad_scaler.GradScaler() if config.device.startswith("cuda") else None
     )
     for t in tqdm(
         range(
@@ -74,32 +73,41 @@ def train_loop(
             device=config.device,
         )
         # Forward pass.
-        logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(input_seq)
-        loss = cross_entropy(logits=logits, targets=label_seq)
+        if config.device.startswith("cudda"):
+            with torch.autocast(device_type=config.device, dtype=dtype):
+                logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(
+                    input_seq
+                )
+                loss = cross_entropy(logits=logits, targets=label_seq)
+        else:
+            logits: Float[torch.Tensor, "batch_size seq_len vocab_size"] = model(
+                input_seq
+            )
+            loss = cross_entropy(logits=logits, targets=label_seq)
         loss_val = loss.detach().cpu().item()
-        metric_history["training_loss"].append(loss_val)
 
         # Backward pass.
-        loss.backward()
+        if scaler:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
         if wandb_run is not None:
             wandb_run.log(
                 {
                     "training_loss": loss_val,
                     "lr": optimizer.param_groups[0]["lr"],
                     "total_gradient_l2_norm": get_total_gradient_l2_norm(
-                        model.parameters(), device=config.device
+                        model.parameters(), device=torch.device(config.device)
                     ),
                 },
                 step=t + 1,
             )
 
-        if config.max_total_gradient_l2_norm:
-            clip_gradient(
-                model.parameters(),
-                max_l2_norm=config.max_total_gradient_l2_norm,
-                device=config.device,
-            )
-        optimizer.step()
+        if scaler:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
         lr_scheduler.step()
 
         if wandb_run and (
@@ -112,8 +120,6 @@ def train_loop(
                 wandb_run=wandb_run,
                 step=t + 1,
             )
-            metric_history["validation_loss"].append(validation_loss)
-            metric_history["validation_perplexity"].append(validation_perplexity)
             if log_metrics_to_console:
                 logging.info(
                     f"Iteration {t+1}. Training loss: {loss_val}. Validation loss: "
@@ -129,7 +135,8 @@ def train_loop(
             )
 
         del loss, loss_val
-    return metric_history
+        if str(config.device).startswith("cuda"):
+            torch.cuda.empty_cache()
 
 
 def run_validation(

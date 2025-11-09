@@ -10,9 +10,6 @@ EXP_NAME="default_tiny_stories_on_mps"
 TRAINING_DATASET_PATH="${BASE_DIR}/data/tiny_stories_train_tokens.npy"
 VALIDATION_DATASET_PATH="${BASE_DIR}/data/tiny_stories_valid_tokens.npy"
 
-# Output paths.
-METRIC_HISTORY_DUMP_PATH="${BASE_DIR}/assignment1_output/experiments/${EXP_NAME}/metric_history.pkl"
-
 # Configs of the transformer (placeholders - edit as needed).
 VOCAB_SIZE=10000
 MAX_CONTEXT_LENGTH=256
@@ -61,7 +58,6 @@ TRAIN_CMD="uv run cs336_basics/train_transformer_lm_main.py"
 $TRAIN_CMD  \
 	--training_dataset_path="${TRAINING_DATASET_PATH}" \
 	--validation_dataset_path="${VALIDATION_DATASET_PATH}" \
-	--metric_history_dump_path="${METRIC_HISTORY_DUMP_PATH}" \
 	--vocab_size=${VOCAB_SIZE} \
 	--max_context_length=${MAX_CONTEXT_LENGTH} \
 	--num_layers=${NUM_LAYERS} \

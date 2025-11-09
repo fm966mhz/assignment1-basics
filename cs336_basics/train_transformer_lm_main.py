@@ -138,7 +138,6 @@ def _load_or_init_state(
             d_ff=FLAGS.d_ff,
         ),
         device=FLAGS.device,
-        dtype=_get_dtype(),
     )
     optimizer = optimizers.AdamW(
         model.parameters(),
@@ -225,6 +224,7 @@ def main(argv):
             max_total_gradient_l2_norm=FLAGS.max_total_gradient_l2_norm,
             device=FLAGS.device,
         ),
+        dtype=_get_dtype(),
         checkpoint_manager=checkpoint_manager,
         wandb_run=wandb_run,
         log_metrics_to_console=FLAGS.log_metrics_to_console,
