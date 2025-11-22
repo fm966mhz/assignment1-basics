@@ -49,4 +49,8 @@ def get_batch(
     if str(device).startswith("cuda"):
         inputs = inputs.pin_memory().to(device)
         labels = labels.pin_memory().to(device)
+    else:
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+
     return inputs, labels
